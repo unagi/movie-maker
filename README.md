@@ -10,6 +10,7 @@
 - タイトル入力必須
 - 出力先とアーカイブ先を別指定
 - ffmpegで高音質エンコード（AAC 320kbps / 48kHz）
+- GPU対応エンコーダが利用可能なら自動で使用（NVENC/QSV/AMF）
 
 ## 動作環境
 - Windows 10/11
@@ -34,7 +35,7 @@ dotnet run --project .\MovieMaker.csproj
 
 ## 出力ルール
 - 出力先
-`出力先\{タイトル}\{タイトル}_yyyyMMdd_HHmmss.mp4`
+`出力先\{タイトル}_yyyyMMdd_HHmmss.mp4`
 - アーカイブ
 `アーカイブ\{タイトル}\` に元データをコピー
 - 同名タイトルが存在する場合
@@ -43,6 +44,7 @@ dotnet run --project .\MovieMaker.csproj
 ## 制約
 - 画像の縦横比は 9:16 または 16:9 のみ許可（±1%）
 - それ以外はエラー
+- YouTube Shorts向け（縦動画）は音楽が180秒以上の場合のみ2:59に収めるため末尾1秒をフェードアウトして短縮
 
 ## ログ
 - `logs/` にffmpegのログを出力

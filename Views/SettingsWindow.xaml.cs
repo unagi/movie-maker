@@ -2,6 +2,8 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Forms;
+using System.Windows.Input;
+using System.Windows.Media;
 using MovieMaker.Services;
 using MovieMaker.ViewModels;
 
@@ -59,6 +61,39 @@ public partial class SettingsWindow : Window
     {
         this.DialogResult = false;
         Close();
+    }
+
+    private void CloseButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private void TitleBar_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (IsClickOnInteractiveElement(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        if (e.ButtonState == MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
+    }
+
+    private static bool IsClickOnInteractiveElement(DependencyObject? source)
+    {
+        var current = source;
+        while (current != null)
+        {
+            if (current is System.Windows.Controls.Primitives.ButtonBase)
+            {
+                return true;
+            }
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private static string? PickFolder(string? initialPath)

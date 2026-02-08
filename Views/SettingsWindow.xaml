@@ -1,36 +1,178 @@
 ﻿<Window x:Class="MovieMaker.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="設定" Height="240" Width="560" ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner">
-  <Grid Margin="16">
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="設定" Height="360" Width="640" ResizeMode="NoResize"
+        Background="#F5F6F8" WindowStartupLocation="CenterOwner"
+        WindowStyle="None">
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="0"
+                        ResizeBorderThickness="6"
+                        GlassFrameThickness="0"
+                        UseAeroCaptionButtons="False"/>
+  </shell:WindowChrome.WindowChrome>
+  <Window.Resources>
+    <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
+    <SolidColorBrush x:Key="TextPrimary" Color="#111827"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#6B7280"/>
+    <SolidColorBrush x:Key="BorderSoft" Color="#E5E7EB"/>
+    <SolidColorBrush x:Key="CardBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AppBlue" Color="#1977F3"/>
+    <SolidColorBrush x:Key="AppBlueSoft" Color="#E8F0FE"/>
+
+    <Style x:Key="CardStyle" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource CardBackground}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="12"/>
+    </Style>
+
+    <Style x:Key="PrimaryButton" TargetType="Button">
+      <Setter Property="Background" Value="#7FB6E9"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#7FB6E9"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="16,12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="10">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SecondaryButton" TargetType="Button">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="16,12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="10">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="TitleBarButton" TargetType="Button">
+      <Setter Property="Width" Value="40"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+      <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}" CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#EF4444"/>
+          <Setter Property="Foreground" Value="White"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+  </Window.Resources>
+
+  <Grid>
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="56"/>
+      <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
-    <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="Auto"/>
-      <ColumnDefinition Width="*"/>
-      <ColumnDefinition Width="Auto"/>
-    </Grid.ColumnDefinitions>
 
-    <TextBlock Grid.Row="0" Grid.Column="0" Text="出力先" Margin="0,0,8,8" VerticalAlignment="Center"/>
-    <TextBox Grid.Row="0" Grid.Column="1" Margin="0,0,8,8"
-             Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}"/>
-    <Button Grid.Row="0" Grid.Column="2" Content="参照" Width="60" Margin="0,0,0,8"
-            Click="BrowseOutput_OnClick"/>
+    <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,0,0,1"
+            MouseLeftButtonDown="TitleBar_OnMouseLeftButtonDown">
+      <Grid Margin="20,10,12,10">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Border Width="36" Height="36" CornerRadius="10" Background="{StaticResource AppBlue}" Margin="0,0,12,0">
+            <TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="16"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <StackPanel>
+            <TextBlock Text="設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"/>
+            <TextBlock Text="出力先とアーカイブの保存先" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
+          </StackPanel>
+        </StackPanel>
+        <Button Grid.Column="1" Style="{StaticResource TitleBarButton}"
+                Content="&#xE8BB;" Click="CloseButton_OnClick"/>
+      </Grid>
+    </Border>
 
-    <TextBlock Grid.Row="1" Grid.Column="0" Text="アーカイブ" Margin="0,0,8,8" VerticalAlignment="Center"/>
-    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,8,8"
-             Text="{Binding ArchiveDirectory, UpdateSourceTrigger=PropertyChanged}"/>
-    <Button Grid.Row="1" Grid.Column="2" Content="参照" Width="60" Margin="0,0,0,8"
-            Click="BrowseArchive_OnClick"/>
+    <StackPanel Grid.Row="1" Margin="20">
+      <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource AppBlueSoft}" Margin="0,0,10,0">
+            <TextBlock Text="&#xE8B7;" FontFamily="{StaticResource IconFont}" Foreground="{StaticResource AppBlue}" FontSize="14"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <StackPanel Grid.Column="1" Margin="0,0,12,0">
+            <TextBlock Text="出力先" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" Margin="0,6,0,0"
+                     BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+          </StackPanel>
+          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Style="{StaticResource SecondaryButton}" Click="BrowseOutput_OnClick"/>
+        </Grid>
+      </Border>
 
-    <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
-                HorizontalAlignment="Right" Margin="0,8,0,0">
-      <Button Content="キャンセル" Width="80" Margin="0,0,8,0" Click="Cancel_OnClick"/>
-      <Button Content="保存" Width="80" Click="Save_OnClick"/>
+      <Border Style="{StaticResource CardStyle}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource AppBlueSoft}" Margin="0,0,10,0">
+            <TextBlock Text="&#xE8B7;" FontFamily="{StaticResource IconFont}" Foreground="{StaticResource AppBlue}" FontSize="14"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <StackPanel Grid.Column="1" Margin="0,0,12,0">
+            <TextBlock Text="アーカイブ" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding ArchiveDirectory, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" Margin="0,6,0,0"
+                     BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+          </StackPanel>
+          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Style="{StaticResource SecondaryButton}" Click="BrowseArchive_OnClick"/>
+        </Grid>
+      </Border>
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="20,0,20,16">
+      <Button Content="キャンセル" Width="110" Height="44" Margin="0,0,8,0" Style="{StaticResource SecondaryButton}" Click="Cancel_OnClick"/>
+      <Button Content="保存" Width="110" Height="44" Style="{StaticResource PrimaryButton}" Click="Save_OnClick"/>
     </StackPanel>
   </Grid>
 </Window>

@@ -40,9 +40,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _aspectLabel = "比率: 未判定";
     private string _outputDirectoryLabel = "出力先: 未設定";
     private string _archiveDirectoryLabel = "アーカイブ: 未設定";
+    private string _outputDirectoryPath = string.Empty;
+    private string _archiveDirectoryPath = string.Empty;
     private string _statusMessage = "準備してください";
     private bool _canEncode;
     private bool _isEncoding;
+    private bool _hasErrors;
 
     private int _imageWidth;
     private int _imageHeight;
@@ -184,6 +187,53 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    public string OutputDirectoryPath
+    {
+        get => _outputDirectoryPath;
+        private set
+        {
+            if (_outputDirectoryPath == value) return;
+            _outputDirectoryPath = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string ArchiveDirectoryPath
+    {
+        get => _archiveDirectoryPath;
+        private set
+        {
+            if (_archiveDirectoryPath == value) return;
+            _archiveDirectoryPath = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool HasErrors
+    {
+        get => _hasErrors;
+        private set
+        {
+            if (_hasErrors == value) return;
+            _hasErrors = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool IsImageReady => !string.IsNullOrWhiteSpace(_imagePath);
+    public string ImageStatusText => IsImageReady ? Path.GetFileName(_imagePath!) : "未設定";
+
+    public bool IsAudioReady => !string.IsNullOrWhiteSpace(_audioPath);
+    public string AudioStatusText => IsAudioReady ? Path.GetFileName(_audioPath!) : "未設定";
+
+    public bool IsOrientationReady => _orientation != null;
+    public string OrientationStatusText => _orientation == null
+        ? "未判定"
+        : _orientation == VideoOrientation.Vertical ? "縦 (9:16)" : "横 (16:9)";
+
+    public bool IsAspectReady => _aspectValid;
+    public string AspectStatusText => _aspectValid ? "OK" : "未判定";
+
     public void HandleDrop(string[] files)
     {
         if (files == null || files.Length == 0)
@@ -230,6 +280,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _imageHeight = bitmap.PixelHeight;
 
             UpdateAspectInfo();
+            NotifyStatusChanged();
         }
         catch
         {
@@ -242,6 +293,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             ImageFileLabel = "画像: 読み込み失敗";
             OrientationLabel = "向き: 未判定";
             AspectLabel = "比率: 未判定";
+            NotifyStatusChanged();
         }
     }
 
@@ -249,6 +301,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         _audioPath = path;
         AudioFileLabel = $"音楽: {Path.GetFileName(path)}";
+        NotifyStatusChanged();
     }
 
     private void UpdateAspectInfo()
@@ -259,6 +312,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _aspectValid = false;
             OrientationLabel = "向き: 未判定";
             AspectLabel = "比率: 未判定";
+            NotifyStatusChanged();
             return;
         }
 
@@ -285,6 +339,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OrientationLabel = "向き: 未判定";
             AspectLabel = $"比率: {ratio:F3} (9:16/16:9以外)";
         }
+        NotifyStatusChanged();
     }
 
     private static bool IsRatioClose(double ratio, double target)
@@ -304,6 +359,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ArchiveDirectoryLabel = string.IsNullOrWhiteSpace(archive)
             ? "アーカイブ: 未設定"
             : $"アーカイブ: {archive}";
+
+        OutputDirectoryPath = output;
+        ArchiveDirectoryPath = archive;
     }
 
     private void UpdateValidation(bool updateStatus)
@@ -349,12 +407,25 @@ public sealed class MainViewModel : INotifyPropertyChanged
             errors.Add("ffmpegが見つかりません (PATH)");
         }
 
+        HasErrors = errors.Count > 0;
         CanEncode = errors.Count == 0 && !IsEncoding;
 
         if (updateStatus)
         {
-            StatusMessage = errors.Count == 0 ? "準備完了" : string.Join(" / ", errors);
+            StatusMessage = errors.Count == 0 ? "準備完了" : string.Join(Environment.NewLine, errors);
         }
+    }
+
+    private void NotifyStatusChanged()
+    {
+        OnPropertyChanged(nameof(IsImageReady));
+        OnPropertyChanged(nameof(ImageStatusText));
+        OnPropertyChanged(nameof(IsAudioReady));
+        OnPropertyChanged(nameof(AudioStatusText));
+        OnPropertyChanged(nameof(IsOrientationReady));
+        OnPropertyChanged(nameof(OrientationStatusText));
+        OnPropertyChanged(nameof(IsAspectReady));
+        OnPropertyChanged(nameof(AspectStatusText));
     }
 
     private static bool ContainsInvalidTitleChars(string title)
@@ -420,10 +491,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var outputRoot = SettingsService.Current.OutputDirectory.Trim();
             var archiveRoot = SettingsService.Current.ArchiveDirectory.Trim();
 
-            var titleFolderName = ResolveTitleFolderName(title, outputRoot, archiveRoot);
+            var archiveFolderName = ResolveArchiveFolderName(title, archiveRoot);
 
-            var outputFolder = Path.Combine(outputRoot, titleFolderName);
-            var archiveFolder = Path.Combine(archiveRoot, titleFolderName);
+            var outputFolder = outputRoot;
+            var archiveFolder = Path.Combine(archiveRoot, archiveFolderName);
 
             Directory.CreateDirectory(outputFolder);
             Directory.CreateDirectory(archiveFolder);
@@ -452,7 +523,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             if (result.Success)
             {
-                StatusMessage = $"完了: {result.OutputPath}";
+                StatusMessage = string.IsNullOrWhiteSpace(result.Encoder)
+                    ? $"完了: {result.OutputPath}"
+                    : $"完了: {result.OutputPath} (Encoder: {result.Encoder})";
             }
             else
             {
@@ -470,19 +543,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private static string ResolveTitleFolderName(string title, string outputRoot, string archiveRoot)
+    private static string ResolveArchiveFolderName(string title, string archiveRoot)
     {
         var baseName = title;
-        if (Directory.Exists(Path.Combine(outputRoot, baseName)) ||
-            Directory.Exists(Path.Combine(archiveRoot, baseName)))
+        if (Directory.Exists(Path.Combine(archiveRoot, baseName)))
         {
             baseName = $"{title}_{DateTime.Now:yyyyMMdd}";
         }
 
         var candidate = baseName;
         var index = 1;
-        while (Directory.Exists(Path.Combine(outputRoot, candidate)) ||
-               Directory.Exists(Path.Combine(archiveRoot, candidate)))
+        while (Directory.Exists(Path.Combine(archiveRoot, candidate)))
         {
             candidate = $"{baseName}_{index}";
             index++;

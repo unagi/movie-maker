@@ -1,73 +1,416 @@
 ﻿<Window x:Class="MovieMaker.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:sys="clr-namespace:System.Windows;assembly=PresentationFramework"
         xmlns:conv="clr-namespace:MovieMaker.Converters"
-        Title="Movie Maker" Height="720" Width="960"
+        Title="Movie Maker" Height="720" Width="1080"
+        Background="#F5F6F8"
+        WindowStyle="None"
         WindowStartupLocation="CenterScreen">
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="0"
+                        ResizeBorderThickness="6"
+                        GlassFrameThickness="0"
+                        UseAeroCaptionButtons="False"/>
+  </shell:WindowChrome.WindowChrome>
   <Window.Resources>
+    <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
     <conv:NullToVisibilityConverter x:Key="NullToVisibility"/>
+    <conv:StringNullOrEmptyToVisibilityConverter x:Key="StringEmptyToVisibility"/>
+    <conv:StringNullOrEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibility" Inverse="True"/>
+    <conv:BoolToTextConverter x:Key="BadgeDefaultText" TrueText="OK" FalseText="未設定"/>
+    <conv:BoolToTextConverter x:Key="BadgePendingText" TrueText="OK" FalseText="未判定"/>
     <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+
+    <SolidColorBrush x:Key="TextPrimary" Color="#111827"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#6B7280"/>
+    <SolidColorBrush x:Key="BorderSoft" Color="#E5E7EB"/>
+    <SolidColorBrush x:Key="CardBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AppBlue" Color="#1977F3"/>
+    <SolidColorBrush x:Key="AppBlueSoft" Color="#E8F0FE"/>
+    <SolidColorBrush x:Key="DangerForeground" Color="#D92D20"/>
+    <SolidColorBrush x:Key="DangerBackground" Color="#FEE4E2"/>
+    <SolidColorBrush x:Key="DangerBorder" Color="#FECDCA"/>
+    <SolidColorBrush x:Key="SuccessForeground" Color="#027A48"/>
+    <SolidColorBrush x:Key="SuccessBackground" Color="#ECFDF3"/>
+    <SolidColorBrush x:Key="SuccessBorder" Color="#ABEFC6"/>
+
+    <Style x:Key="CardStyle" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource CardBackground}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="12"/>
+    </Style>
+
+    <Style x:Key="SectionTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+
+    <Style x:Key="PrimaryButton" TargetType="Button">
+      <Setter Property="Background" Value="#7FB6E9"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#7FB6E9"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="14,10"/>
+      <Setter Property="MinHeight" Value="44"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="10">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Background" Value="#C9DDF4"/>
+          <Setter Property="BorderBrush" Value="#C9DDF4"/>
+          <Setter Property="Foreground" Value="#F7F9FC"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="BadgeStyle" TargetType="Border">
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="8,2"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="BorderBrush" Value="{StaticResource DangerBorder}"/>
+      <Setter Property="Background" Value="{StaticResource DangerBackground}"/>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+          <Setter Property="BorderBrush" Value="{StaticResource SuccessBorder}"/>
+          <Setter Property="Background" Value="{StaticResource SuccessBackground}"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="BadgeTextStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource DangerForeground}"/>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
+          <Setter Property="Foreground" Value="{StaticResource SuccessForeground}"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="ErrorCardStyle" TargetType="Border" BasedOn="{StaticResource CardStyle}">
+      <Setter Property="Visibility" Value="Hidden"/>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding HasErrors}" Value="True">
+          <Setter Property="Visibility" Value="Visible"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="TitleBarButtonBase" TargetType="Button">
+      <Setter Property="Width" Value="40"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+      <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}" CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="TitleBarButton" TargetType="Button" BasedOn="{StaticResource TitleBarButtonBase}">
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#E5E7EB"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="CloseButton" TargetType="Button" BasedOn="{StaticResource TitleBarButtonBase}">
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#EF4444"/>
+          <Setter Property="Foreground" Value="White"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="TitleBarButtonMax" TargetType="Button" BasedOn="{StaticResource TitleBarButton}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+          <Setter Property="Visibility" Value="Collapsed"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="TitleBarButtonRestore" TargetType="Button" BasedOn="{StaticResource TitleBarButton}">
+      <Setter Property="Visibility" Value="Collapsed"/>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+          <Setter Property="Visibility" Value="Visible"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
   </Window.Resources>
 
-  <Grid Margin="16">
+  <Grid>
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="56"/>
       <RowDefinition Height="*"/>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
-      <TextBlock Text="動画タイトル" Width="90" VerticalAlignment="Center"/>
-      <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Width="520"/>
-    </StackPanel>
-
-    <Border Grid.Row="1" BorderBrush="#999" BorderThickness="1" CornerRadius="6"
-            Background="#F8F8F8" AllowDrop="True"
-            Drop="DropArea_OnDrop" DragEnter="DropArea_OnDragEnter">
-      <Grid Margin="12">
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto"/>
-          <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-        <TextBlock Text="ここに画像ファイルと音楽ファイルをドロップ"
-                   FontSize="14" Foreground="#555" Margin="0,0,0,8"/>
-        <Border Grid.Row="1" BorderBrush="#CCC" BorderThickness="1" CornerRadius="4" Background="White">
-          <Grid>
-            <Image Source="{Binding ImagePreview}" Stretch="Uniform"/>
-            <TextBlock Text="プレビューなし" Foreground="#999"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Visibility="{Binding ImagePreview, Converter={StaticResource NullToVisibility}}"/>
-          </Grid>
-        </Border>
+    <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,0,0,1"
+            MouseLeftButtonDown="TitleBar_OnMouseLeftButtonDown">
+      <Grid Margin="20,10,12,10">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Border Width="36" Height="36" CornerRadius="10" Background="{StaticResource AppBlue}" Margin="0,0,12,0">
+            <TextBlock Text="&#xE714;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="16"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <StackPanel>
+            <TextBlock Text="Movie Maker" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"/>
+            <TextBlock Text="画像と音楽から動画を作成" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button Width="34" Height="34" Command="{Binding OpenSettingsCommand}" Margin="0,0,8,0"
+                  Background="{StaticResource AppBlueSoft}" BorderBrush="{StaticResource AppBlueSoft}"
+                  Foreground="{StaticResource AppBlue}" FontSize="16" Content="&#xE713;"
+                  FontFamily="{StaticResource IconFont}"/>
+          <Button Style="{StaticResource TitleBarButton}"
+                  Click="MinimizeButton_OnClick"
+                  Content="&#xE921;"/>
+          <Button Style="{StaticResource TitleBarButtonMax}"
+                  Click="MaximizeButton_OnClick"
+                  Content="&#xE922;"/>
+          <Button Style="{StaticResource TitleBarButtonRestore}"
+                  Click="RestoreButton_OnClick"
+                  Content="&#xE923;"/>
+          <Button Style="{StaticResource CloseButton}"
+                  Click="CloseButton_OnClick"
+                  Content="&#xE8BB;"/>
+        </StackPanel>
       </Grid>
     </Border>
 
-    <Grid Grid.Row="2" Margin="0,12,0,12">
+    <Grid Grid.Row="1" Margin="20">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="2.1*"/>
+        <ColumnDefinition Width="1*"/>
       </Grid.ColumnDefinitions>
 
-      <StackPanel>
-        <TextBlock Text="{Binding ImageFileLabel}"/>
-        <TextBlock Text="{Binding AudioFileLabel}"/>
-        <TextBlock Text="{Binding OrientationLabel}"/>
-        <TextBlock Text="{Binding AspectLabel}"/>
-        <TextBlock Text="{Binding OutputDirectoryLabel}"/>
-        <TextBlock Text="{Binding ArchiveDirectoryLabel}"/>
+      <StackPanel Grid.Column="0" Margin="0,0,16,0">
+        <TextBlock Text="動画タイトル" Style="{StaticResource SectionTitle}"/>
+        <Grid Margin="0,0,0,16">
+          <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Height="38" Padding="10,6" FontSize="13"
+                   BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+          <TextBlock Text="タイトルを入力..." Foreground="#9CA3AF" Margin="12,0,0,0"
+                     VerticalAlignment="Center" IsHitTestVisible="False"
+                     Visibility="{Binding Title, Converter={StaticResource StringEmptyToVisibility}}"/>
+        </Grid>
+
+        <Border Style="{StaticResource CardStyle}" Padding="0" AllowDrop="True"
+                Drop="DropArea_OnDrop" DragEnter="DropArea_OnDragEnter" Margin="0,0,0,16">
+          <Grid>
+            <Rectangle RadiusX="10" RadiusY="10" Stroke="#CBD5E1" StrokeThickness="1"
+                       StrokeDashArray="4 4" Fill="#F9FAFB"/>
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
+              <Border Width="56" Height="56" CornerRadius="28" Background="#E5E7EB" Margin="0,0,0,12">
+                <TextBlock Text="&#xE898;" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="#6B7280"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <TextBlock Text="ここにファイルをドロップ" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center"/>
+              <TextBlock Text="画像ファイルと音楽ファイルに対応" FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,4,0,12"/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Border Background="#EEF2FF" CornerRadius="16" Padding="10,4" Margin="0,0,8,0">
+                  <TextBlock Text="JPG, PNG, WebP" FontSize="11" Foreground="#3B82F6"/>
+                </Border>
+                <Border Background="#EEF2FF" CornerRadius="16" Padding="10,4">
+                  <TextBlock Text="MP3, WAV, AAC" FontSize="11" Foreground="#3B82F6"/>
+                </Border>
+              </StackPanel>
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <TextBlock Text="プレビュー" Style="{StaticResource SectionTitle}"/>
+        <Border Style="{StaticResource CardStyle}" Height="260">
+          <Grid>
+            <Image Source="{Binding ImagePreview}" Stretch="Uniform"/>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="{Binding ImagePreview, Converter={StaticResource NullToVisibility}}">
+              <Border Width="46" Height="46" CornerRadius="23" Background="#E5E7EB" Margin="0,0,0,8">
+                <TextBlock Text="&#xE8A7;" FontFamily="{StaticResource IconFont}" FontSize="16" Foreground="#6B7280"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <TextBlock Text="プレビューなし" Foreground="{StaticResource TextSecondary}"/>
+            </StackPanel>
+          </Grid>
+        </Border>
       </StackPanel>
 
-      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
-        <Button Content="設定" Width="80" Command="{Binding OpenSettingsCommand}" Margin="8,0,0,0"/>
-        <Button Content="エンコード開始" Width="140" Command="{Binding EncodeCommand}" IsEnabled="{Binding CanEncode}" Margin="8,0,0,0"/>
+      <StackPanel Grid.Column="1">
+        <TextBlock Text="ステータス" Style="{StaticResource SectionTitle}"/>
+        <StackPanel Margin="0,0,0,16">
+          <Border Style="{StaticResource CardStyle}" Padding="10" Margin="0,0,0,8">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="28" Height="28" CornerRadius="6" Background="#FEE4E2" Margin="0,0,8,0">
+                  <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" Foreground="#D92D20" FontSize="12"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="画像" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding ImageStatusText}" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" MaxWidth="120" TextTrimming="CharacterEllipsis"/>
+                <Border Style="{StaticResource BadgeStyle}" Tag="{Binding IsImageReady}">
+                  <TextBlock Style="{StaticResource BadgeTextStyle}"
+                             Text="{Binding IsImageReady, Converter={StaticResource BadgeDefaultText}}"/>
+                </Border>
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <Border Style="{StaticResource CardStyle}" Padding="10" Margin="0,0,0,8">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="28" Height="28" CornerRadius="6" Background="#FEE4E2" Margin="0,0,8,0">
+                  <TextBlock Text="&#xE189;" FontFamily="{StaticResource IconFont}" Foreground="#D92D20" FontSize="12"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="音楽" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding AudioStatusText}" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" MaxWidth="120" TextTrimming="CharacterEllipsis"/>
+                <Border Style="{StaticResource BadgeStyle}" Tag="{Binding IsAudioReady}">
+                  <TextBlock Style="{StaticResource BadgeTextStyle}"
+                             Text="{Binding IsAudioReady, Converter={StaticResource BadgeDefaultText}}"/>
+                </Border>
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <Border Style="{StaticResource CardStyle}" Padding="10" Margin="0,0,0,8">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="28" Height="28" CornerRadius="6" Background="#FEE4E2" Margin="0,0,8,0">
+                  <TextBlock Text="&#xE7AD;" FontFamily="{StaticResource IconFont}" Foreground="#D92D20" FontSize="12"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="向き" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding OrientationStatusText}" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" MaxWidth="120" TextTrimming="CharacterEllipsis"/>
+                <Border Style="{StaticResource BadgeStyle}" Tag="{Binding IsOrientationReady}">
+                  <TextBlock Style="{StaticResource BadgeTextStyle}"
+                             Text="{Binding IsOrientationReady, Converter={StaticResource BadgePendingText}}"/>
+                </Border>
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <Border Style="{StaticResource CardStyle}" Padding="10">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="28" Height="28" CornerRadius="6" Background="#FEE4E2" Margin="0,0,8,0">
+                  <TextBlock Text="&#xE7A8;" FontFamily="{StaticResource IconFont}" Foreground="#D92D20" FontSize="12"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="比率" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding AspectStatusText}" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" MaxWidth="120" TextTrimming="CharacterEllipsis"/>
+                <Border Style="{StaticResource BadgeStyle}" Tag="{Binding IsAspectReady}">
+                  <TextBlock Style="{StaticResource BadgeTextStyle}"
+                             Text="{Binding IsAspectReady, Converter={StaticResource BadgePendingText}}"/>
+                </Border>
+              </StackPanel>
+            </Grid>
+          </Border>
+        </StackPanel>
+
+        <TextBlock Text="パス設定" Style="{StaticResource SectionTitle}"/>
+        <StackPanel Margin="0,0,0,16">
+          <Border Style="{StaticResource CardStyle}" Padding="10" Margin="0,0,0,8">
+            <StackPanel>
+              <TextBlock Text="出力先" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+              <TextBlock Text="{Binding OutputDirectoryPath}" Foreground="{StaticResource TextPrimary}" TextWrapping="Wrap"
+                         Visibility="{Binding OutputDirectoryPath, Converter={StaticResource StringNotEmptyToVisibility}}"/>
+              <TextBlock Text="未設定" Foreground="{StaticResource DangerForeground}" FontSize="12"
+                         Visibility="{Binding OutputDirectoryPath, Converter={StaticResource StringEmptyToVisibility}}"/>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource CardStyle}" Padding="10">
+            <StackPanel>
+              <TextBlock Text="アーカイブ" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+              <TextBlock Text="{Binding ArchiveDirectoryPath}" Foreground="{StaticResource TextPrimary}" TextWrapping="Wrap"
+                         Visibility="{Binding ArchiveDirectoryPath, Converter={StaticResource StringNotEmptyToVisibility}}"/>
+              <TextBlock Text="未設定" Foreground="{StaticResource DangerForeground}" FontSize="12"
+                         Visibility="{Binding ArchiveDirectoryPath, Converter={StaticResource StringEmptyToVisibility}}"/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <Border Style="{StaticResource ErrorCardStyle}" Background="{StaticResource DangerBackground}"
+                BorderBrush="{StaticResource DangerBorder}" MinHeight="72" MaxHeight="96">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource DangerForeground}" TextWrapping="Wrap"/>
+          </ScrollViewer>
+        </Border>
+
+        <Button Style="{StaticResource PrimaryButton}" Content="▶ エンコード開始" Command="{Binding EncodeCommand}" IsEnabled="{Binding CanEncode}" Margin="0,12,0,8"/>
+
+        <ProgressBar Height="6" IsIndeterminate="True" Margin="0,0,0,8"
+                     Visibility="{Binding IsEncoding, Converter={StaticResource BoolToVisibility}}"/>
+        <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap">
+          <TextBlock.Style>
+            <Style TargetType="TextBlock">
+              <Setter Property="Visibility" Value="Visible"/>
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                  <Setter Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </TextBlock.Style>
+        </TextBlock>
       </StackPanel>
     </Grid>
-
-    <StackPanel Grid.Row="3">
-      <ProgressBar Height="8" IsIndeterminate="True"
-                   Visibility="{Binding IsEncoding, Converter={StaticResource BoolToVisibility}}"/>
-      <TextBlock Text="{Binding StatusMessage}" Margin="0,8,0,0" TextWrapping="Wrap"/>
-    </StackPanel>
   </Grid>
 </Window>
