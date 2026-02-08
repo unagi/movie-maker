@@ -1,0 +1,22 @@
+﻿# Build outputs
+bin/
+obj/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider
+.idea/
+
+# Visual Studio Code
+.vscode/
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Logs
+logs/
