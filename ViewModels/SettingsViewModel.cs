@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using MovieMaker.Models;
+using MovieMaker.Services;
 
 namespace MovieMaker.ViewModels;
 
@@ -45,6 +46,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             ArchiveDirectory = ArchiveDirectory?.Trim() ?? string.Empty
         };
     }
+
+    public string VersionText => VersionService.DisplayVersion;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

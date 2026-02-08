@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using System.Text.Json;
 using MovieMaker.Models;
 
 namespace MovieMaker.Services;
@@ -25,6 +26,14 @@ public sealed record EncodeResult(
     string LogPath,
     string? ErrorMessage,
     string Encoder);
+
+public sealed record AudioInfo(
+    int? SampleRate,
+    int? BitDepth,
+    int? Channels,
+    int? BitRate,
+    string? SampleFormat,
+    double? DurationSeconds);
 
 public static class EncodingService
 {
@@ -204,6 +213,73 @@ public static class EncodingService
         return filter;
     }
 
+    public static async Task<AudioInfo?> GetAudioInfoAsync(string audioPath, string? ffmpegPath = null)
+    {
+        if (!File.Exists(audioPath))
+        {
+            return null;
+        }
+
+        var ffprobePath = ResolveFfprobePath(ffmpegPath);
+        if (ffprobePath == null)
+        {
+            return null;
+        }
+
+        var document = await RunFfprobeJsonAsync(ffprobePath, new[]
+        {
+            "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=sample_rate,bits_per_sample,bits_per_raw_sample,channels,bit_rate,sample_fmt:format=duration",
+            "-of", "json",
+            audioPath
+        });
+
+        if (document == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var streams = document.RootElement.GetProperty("streams");
+            if (streams.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            var stream = streams[0];
+            var sampleRate = ParseIntProperty(stream, "sample_rate");
+            var bitDepth = ParseIntProperty(stream, "bits_per_sample")
+                           ?? ParseIntProperty(stream, "bits_per_raw_sample");
+            var channels = ParseIntProperty(stream, "channels");
+            var bitRate = ParseIntProperty(stream, "bit_rate");
+            var sampleFormat = ParseStringProperty(stream, "sample_fmt");
+            var durationSeconds = ParseDurationSeconds(document.RootElement);
+
+            if (!bitDepth.HasValue && !string.IsNullOrWhiteSpace(sampleFormat))
+            {
+                bitDepth = ParseBitDepthFromSampleFormat(sampleFormat);
+            }
+
+            if (sampleRate == null && channels == null && bitDepth == null && bitRate == null &&
+                sampleFormat == null && durationSeconds == null)
+            {
+                return null;
+            }
+
+            return new AudioInfo(sampleRate, bitDepth, channels, bitRate, sampleFormat, durationSeconds);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            document.Dispose();
+        }
+    }
+
     private static async Task<bool> ShouldTrimShortsAsync(
         EncodeRequest request,
         StreamWriter logWriter,
@@ -214,7 +290,7 @@ public static class EncodingService
             return false;
         }
 
-        var duration = await GetAudioDurationSecondsAsync(request, logWriter, logLock);
+        var duration = await GetAudioDurationSecondsAsync(request.AudioPath, request.FfmpegPath, logWriter, logLock);
         if (!duration.HasValue)
         {
             return false;
@@ -231,71 +307,65 @@ public static class EncodingService
     }
 
     private static async Task<double?> GetAudioDurationSecondsAsync(
-        EncodeRequest request,
-        StreamWriter logWriter,
-        object logLock)
+        string audioPath,
+        string? ffmpegPath,
+        StreamWriter? logWriter,
+        object? logLock)
     {
-        var ffprobePath = ResolveFfprobePath(request.FfmpegPath);
+        var ffprobePath = ResolveFfprobePath(ffmpegPath);
         if (ffprobePath == null)
         {
-            WriteLog(logWriter, logLock, "ffprobe not found. Skip duration check.");
+            TryLog(logWriter, logLock, "ffprobe not found. Skip duration check.");
             return null;
         }
 
         try
         {
-            var psi = new ProcessStartInfo
+            var document = await RunFfprobeJsonAsync(ffprobePath, new[]
             {
-                FileName = ffprobePath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add("-v");
-            psi.ArgumentList.Add("error");
-            psi.ArgumentList.Add("-show_entries");
-            psi.ArgumentList.Add("format=duration");
-            psi.ArgumentList.Add("-of");
-            psi.ArgumentList.Add("default=noprint_wrappers=1:nokey=1");
-            psi.ArgumentList.Add(request.AudioPath);
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                audioPath
+            });
 
-            using var process = Process.Start(psi);
-            if (process == null)
+            if (document == null)
             {
                 return null;
             }
 
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
+            try
             {
-                WriteLog(logWriter, logLock, $"ffprobe failed: {error}");
+                var format = document.RootElement.GetProperty("format");
+                if (format.TryGetProperty("duration", out var durationElement))
+                {
+                    var durationText = durationElement.GetString();
+                    if (double.TryParse(durationText, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+                    {
+                        return seconds;
+                    }
+                }
+
+                TryLog(logWriter, logLock, "ffprobe duration parse failed.");
                 return null;
             }
-
-            if (double.TryParse(output.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+            finally
             {
-                return seconds;
+                document.Dispose();
             }
-
-            WriteLog(logWriter, logLock, $"ffprobe duration parse failed: {output}");
-            return null;
         }
         catch (Exception ex)
         {
-            WriteLog(logWriter, logLock, $"ffprobe error: {ex.Message}");
+            TryLog(logWriter, logLock, $"ffprobe error: {ex.Message}");
             return null;
         }
     }
 
-    private static string? ResolveFfprobePath(string ffmpegPath)
+    private static string? ResolveFfprobePath(string? ffmpegPath)
     {
         try
         {
-            var ffmpegDir = Path.GetDirectoryName(ffmpegPath);
+            var ffmpegDir = string.IsNullOrWhiteSpace(ffmpegPath) ? null : Path.GetDirectoryName(ffmpegPath);
             if (!string.IsNullOrWhiteSpace(ffmpegDir))
             {
                 var local = Path.Combine(ffmpegDir, "ffprobe.exe");
@@ -328,6 +398,144 @@ public static class EncodingService
         }
 
         return null;
+    }
+
+    private static async Task<JsonDocument?> RunFfprobeJsonAsync(string ffprobePath, IEnumerable<string> arguments)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffprobePath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var arg in arguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(psi);
+        if (process == null)
+        {
+            return null;
+        }
+
+        var output = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(output))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonDocument.Parse(output);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? ParseIntProperty(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var numeric))
+        {
+            return numeric;
+        }
+
+        var text = value.GetString();
+        if (!string.IsNullOrWhiteSpace(text) &&
+            int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result))
+        {
+            return result;
+        }
+
+        return null;
+    }
+
+    private static string? ParseStringProperty(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value))
+        {
+            return null;
+        }
+
+        return value.GetString();
+    }
+
+    private static double? ParseDurationSeconds(JsonElement root)
+    {
+        if (!root.TryGetProperty("format", out var format))
+        {
+            return null;
+        }
+
+        if (!format.TryGetProperty("duration", out var duration))
+        {
+            return null;
+        }
+
+        var text = duration.GetString();
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return seconds;
+        }
+
+        return null;
+    }
+
+    private static int? ParseBitDepthFromSampleFormat(string sampleFormat)
+    {
+        if (string.IsNullOrWhiteSpace(sampleFormat))
+        {
+            return null;
+        }
+
+        // sample_fmt examples: s16, s16p, s24, s24p, s32, s32p, flt, fltp, dbl, dblp
+        if (sampleFormat.StartsWith("s16", StringComparison.OrdinalIgnoreCase))
+        {
+            return 16;
+        }
+        if (sampleFormat.StartsWith("s24", StringComparison.OrdinalIgnoreCase))
+        {
+            return 24;
+        }
+        if (sampleFormat.StartsWith("s32", StringComparison.OrdinalIgnoreCase))
+        {
+            return 32;
+        }
+        if (sampleFormat.StartsWith("flt", StringComparison.OrdinalIgnoreCase))
+        {
+            return 32;
+        }
+        if (sampleFormat.StartsWith("dbl", StringComparison.OrdinalIgnoreCase))
+        {
+            return 64;
+        }
+
+        return null;
+    }
+
+    private static void TryLog(StreamWriter? logWriter, object? logLock, string message)
+    {
+        if (logWriter == null || logLock == null)
+        {
+            return;
+        }
+
+        lock (logLock)
+        {
+            logWriter.WriteLine(message);
+        }
     }
 
     private static string FormatSeconds(double seconds)

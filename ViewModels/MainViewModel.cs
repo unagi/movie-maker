@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -43,6 +44,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _outputDirectoryPath = string.Empty;
     private string _archiveDirectoryPath = string.Empty;
     private string _statusMessage = "準備してください";
+    private string _audioInfoText = string.Empty;
+    private double? _audioDurationSeconds;
     private bool _canEncode;
     private bool _isEncoding;
     private bool _hasErrors;
@@ -55,6 +58,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public MainViewModel()
     {
         OpenSettingsCommand = new RelayCommand(_ => OpenSettings());
+        OpenOutputFolderCommand = new RelayCommand(_ => OpenFolder(OutputDirectoryPath), _ => Directory.Exists(OutputDirectoryPath));
+        OpenArchiveFolderCommand = new RelayCommand(_ => OpenFolder(ArchiveDirectoryPath), _ => Directory.Exists(ArchiveDirectoryPath));
         EncodeCommand = new AsyncRelayCommand(EncodeAsync, () => CanEncode);
 
         UpdateSettingsLabels();
@@ -62,6 +67,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public RelayCommand OpenSettingsCommand { get; }
+    public RelayCommand OpenOutputFolderCommand { get; }
+    public RelayCommand OpenArchiveFolderCommand { get; }
     public AsyncRelayCommand EncodeCommand { get; }
 
     public string Title
@@ -221,18 +228,70 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public bool IsImageReady => !string.IsNullOrWhiteSpace(_imagePath);
-    public string ImageStatusText => IsImageReady ? Path.GetFileName(_imagePath!) : "未設定";
+    public string ImageStatusText
+    {
+        get
+        {
+            if (!IsImageReady)
+            {
+                return "未設定";
+            }
+
+            var name = Path.GetFileName(_imagePath!);
+            if (_imageWidth > 0 && _imageHeight > 0)
+            {
+                return $"{name} ({_imageWidth}x{_imageHeight})";
+            }
+
+            return name;
+        }
+    }
 
     public bool IsAudioReady => !string.IsNullOrWhiteSpace(_audioPath);
-    public string AudioStatusText => IsAudioReady ? Path.GetFileName(_audioPath!) : "未設定";
+    public string AudioStatusText
+    {
+        get
+        {
+            if (!IsAudioReady)
+            {
+                return "未設定";
+            }
 
-    public bool IsOrientationReady => _orientation != null;
-    public string OrientationStatusText => _orientation == null
-        ? "未判定"
-        : _orientation == VideoOrientation.Vertical ? "縦 (9:16)" : "横 (16:9)";
+            var name = Path.GetFileName(_audioPath!);
+            if (string.IsNullOrWhiteSpace(_audioInfoText))
+            {
+                return name;
+            }
 
-    public bool IsAspectReady => _aspectValid;
-    public string AspectStatusText => _aspectValid ? "OK" : "未判定";
+            return $"{name} ({_audioInfoText})";
+        }
+    }
+
+    public bool IsOutputReady => _aspectValid;
+    public string OutputStatusText
+    {
+        get
+        {
+            if (!_aspectValid || _orientation == null)
+            {
+                return "未判定";
+            }
+
+            var label = _orientation == VideoOrientation.Vertical ? "YouTube Short" : "YouTube";
+            if (!_audioDurationSeconds.HasValue)
+            {
+                return $"{label} (時間未取得)";
+            }
+
+            var duration = _audioDurationSeconds.Value;
+            if (_orientation == VideoOrientation.Vertical && duration >= 180)
+            {
+                duration = 179;
+            }
+
+            return $"{label} ({FormatDuration(duration)})";
+        }
+    }
 
     public void HandleDrop(string[] files)
     {
@@ -300,8 +359,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void SetAudio(string path)
     {
         _audioPath = path;
+        _audioInfoText = "解析中...";
+        _audioDurationSeconds = null;
         AudioFileLabel = $"音楽: {Path.GetFileName(path)}";
         NotifyStatusChanged();
+        _ = UpdateAudioInfoAsync(path);
     }
 
     private void UpdateAspectInfo()
@@ -362,6 +424,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         OutputDirectoryPath = output;
         ArchiveDirectoryPath = archive;
+
+        OpenOutputFolderCommand.RaiseCanExecuteChanged();
+        OpenArchiveFolderCommand.RaiseCanExecuteChanged();
     }
 
     private void UpdateValidation(bool updateStatus)
@@ -422,10 +487,97 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(ImageStatusText));
         OnPropertyChanged(nameof(IsAudioReady));
         OnPropertyChanged(nameof(AudioStatusText));
-        OnPropertyChanged(nameof(IsOrientationReady));
-        OnPropertyChanged(nameof(OrientationStatusText));
-        OnPropertyChanged(nameof(IsAspectReady));
-        OnPropertyChanged(nameof(AspectStatusText));
+        OnPropertyChanged(nameof(IsOutputReady));
+        OnPropertyChanged(nameof(OutputStatusText));
+    }
+
+    private async Task UpdateAudioInfoAsync(string path)
+    {
+        var ffmpegPath = EncodingService.ResolveFfmpegPath();
+        var info = await EncodingService.GetAudioInfoAsync(path, ffmpegPath);
+
+        if (!string.Equals(_audioPath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (info == null)
+        {
+            _audioInfoText = "情報取得不可";
+            _audioDurationSeconds = null;
+        }
+        else
+        {
+            _audioInfoText = FormatAudioInfo(info);
+            _audioDurationSeconds = info.DurationSeconds;
+        }
+        NotifyStatusChanged();
+    }
+
+    private static string FormatAudioInfo(AudioInfo info)
+    {
+        var parts = new List<string>();
+
+        if (info.SampleRate.HasValue)
+        {
+            parts.Add($"{info.SampleRate.Value / 1000.0:0.#}kHz");
+        }
+
+        if (info.BitDepth.HasValue)
+        {
+            if (!string.IsNullOrWhiteSpace(info.SampleFormat) &&
+                (info.SampleFormat.StartsWith("flt", StringComparison.OrdinalIgnoreCase) ||
+                 info.SampleFormat.StartsWith("dbl", StringComparison.OrdinalIgnoreCase)))
+            {
+                parts.Add($"{info.BitDepth.Value}bit float");
+            }
+            else
+            {
+                parts.Add($"{info.BitDepth.Value}bit");
+            }
+        }
+
+        if (info.Channels.HasValue)
+        {
+            parts.Add($"{info.Channels.Value}ch");
+        }
+
+        if (info.BitRate.HasValue && !info.BitDepth.HasValue)
+        {
+            parts.Add($"{info.BitRate.Value / 1000}kbps");
+        }
+
+        return parts.Count == 0 ? "情報取得不可" : string.Join(" / ", parts);
+    }
+
+    private static string FormatDuration(double seconds)
+    {
+        var totalSeconds = Math.Max(0, seconds);
+        var ts = TimeSpan.FromSeconds(totalSeconds);
+        return ts.TotalHours >= 1
+            ? ts.ToString("h\\:mm\\:ss")
+            : ts.ToString("m\\:ss");
+    }
+
+    private static void OpenFolder(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private static bool ContainsInvalidTitleChars(string title)
