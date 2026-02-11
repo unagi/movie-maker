@@ -4,7 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:sys="clr-namespace:System.Windows;assembly=PresentationFramework"
         xmlns:conv="clr-namespace:MovieMaker.Converters"
-        Title="Movie Maker" Height="720" Width="1080"
+        Title="Movie Maker" Height="800" Width="1280" MinWidth="1120" MinHeight="760"
         Background="Transparent"
         WindowStyle="None"
         WindowStartupLocation="CenterScreen"
@@ -83,6 +83,40 @@
       </Style.Triggers>
     </Style>
 
+    <Style x:Key="SecondaryButton" TargetType="Button">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="14,10"/>
+      <Setter Property="MinHeight" Value="44"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="10">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#F9FAFB"/>
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Background" Value="#F3F4F6"/>
+          <Setter Property="Foreground" Value="#9CA3AF"/>
+          <Setter Property="BorderBrush" Value="#E5E7EB"/>
+          <Setter Property="Cursor" Value="Arrow"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
     <Style x:Key="BadgeStyle" TargetType="Border">
       <Setter Property="CornerRadius" Value="12"/>
       <Setter Property="Padding" Value="8,2"/>
@@ -102,15 +136,6 @@
       <Style.Triggers>
         <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
           <Setter Property="Foreground" Value="{StaticResource SuccessForeground}"/>
-        </DataTrigger>
-      </Style.Triggers>
-    </Style>
-
-    <Style x:Key="ErrorCardStyle" TargetType="Border" BasedOn="{StaticResource CardStyle}">
-      <Setter Property="Visibility" Value="Hidden"/>
-      <Style.Triggers>
-        <DataTrigger Binding="{Binding HasErrors}" Value="True">
-          <Setter Property="Visibility" Value="Visible"/>
         </DataTrigger>
       </Style.Triggers>
     </Style>
@@ -257,22 +282,35 @@
         <ColumnDefinition Width="1*"/>
       </Grid.ColumnDefinitions>
 
-      <StackPanel Grid.Column="0" Margin="0,0,16,0">
-        <TextBlock Text="動画タイトル" Style="{StaticResource SectionTitle}"/>
-        <Grid Margin="0,0,0,16">
+      <Grid Grid.Column="0" Margin="0,0,16,0">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="動画タイトル" Style="{StaticResource SectionTitle}"/>
+        <Grid Grid.Row="1" Margin="0,0,0,16">
           <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Height="38" Padding="10,6" FontSize="13"
                    BorderBrush="{StaticResource BorderSoft}" Background="White"/>
-          <TextBlock Text="タイトルを入力..." Foreground="#9CA3AF" Margin="12,0,0,0"
+          <TextBlock Text="タイトルを入力（画像名から自動補完）..." Foreground="#9CA3AF" Margin="12,0,0,0"
                      VerticalAlignment="Center" IsHitTestVisible="False"
                      Visibility="{Binding Title, Converter={StaticResource StringEmptyToVisibility}}"/>
         </Grid>
 
-        <Border Style="{StaticResource CardStyle}" Padding="0" AllowDrop="True"
-                Drop="DropArea_OnDrop" DragEnter="DropArea_OnDragEnter" Margin="0,0,0,16">
-          <Grid>
-            <Rectangle RadiusX="10" RadiusY="10" Stroke="#CBD5E1" StrokeThickness="1"
-                       StrokeDashArray="4 4" Fill="#F9FAFB"/>
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
+        <TextBlock Grid.Row="2" Text="入力とプレビュー" Style="{StaticResource SectionTitle}"/>
+        <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="0"
+                AllowDrop="True" Drop="DropArea_OnDrop" DragEnter="DropArea_OnDragEnter">
+          <Grid Background="#F9FAFB">
+            <Rectangle Margin="12" RadiusX="8" RadiusY="8" Stroke="#CBD5E1" StrokeThickness="1"
+                       StrokeDashArray="4 4" Fill="#F9FAFB"
+                       Visibility="{Binding ImagePreview, Converter={StaticResource NullToVisibility}}"/>
+
+            <Image Source="{Binding ImagePreview}" Stretch="Uniform" Margin="12"/>
+
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24"
+                        Visibility="{Binding ImagePreview, Converter={StaticResource NullToVisibility}}">
               <Border Width="56" Height="56" CornerRadius="28" Background="#E5E7EB" Margin="0,0,0,12">
                 <TextBlock Text="&#xE898;" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="#6B7280"
                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -288,28 +326,29 @@
                 </Border>
               </StackPanel>
             </StackPanel>
+
+            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
+                    Background="#EEF2FF" CornerRadius="12" Padding="10,4"
+                    Visibility="{Binding IsImageReady, Converter={StaticResource BoolToVisibility}}">
+              <TextBlock Text="ドラッグ＆ドロップで差し替え" FontSize="11" Foreground="#3B82F6"/>
+            </Border>
           </Grid>
         </Border>
+      </Grid>
 
-        <TextBlock Text="プレビュー" Style="{StaticResource SectionTitle}"/>
-        <Border Style="{StaticResource CardStyle}" Height="260">
-          <Grid>
-            <Image Source="{Binding ImagePreview}" Stretch="Uniform"/>
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Visibility="{Binding ImagePreview, Converter={StaticResource NullToVisibility}}">
-              <Border Width="46" Height="46" CornerRadius="23" Background="#E5E7EB" Margin="0,0,0,8">
-                <TextBlock Text="&#xE8A7;" FontFamily="{StaticResource IconFont}" FontSize="16" Foreground="#6B7280"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
-              </Border>
-              <TextBlock Text="プレビューなし" Foreground="{StaticResource TextSecondary}"/>
-            </StackPanel>
-          </Grid>
-        </Border>
-      </StackPanel>
+      <Grid Grid.Column="1">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-      <StackPanel Grid.Column="1">
-        <TextBlock Text="ステータス" Style="{StaticResource SectionTitle}"/>
-        <StackPanel Margin="0,0,0,16">
+        <TextBlock Grid.Row="0" Text="ステータス" Style="{StaticResource SectionTitle}"/>
+        <StackPanel Grid.Row="1" Margin="0,0,0,16">
           <Border Style="{StaticResource CardStyle}" Padding="10" Margin="0,0,0,8">
             <Grid>
               <Grid.ColumnDefinitions>
@@ -381,8 +420,8 @@
           </Border>
         </StackPanel>
 
-        <TextBlock Text="パス設定" Style="{StaticResource SectionTitle}"/>
-        <StackPanel Margin="0,0,0,16">
+        <TextBlock Grid.Row="2" Text="パス設定" Style="{StaticResource SectionTitle}"/>
+        <StackPanel Grid.Row="3" Margin="0,0,0,16">
           <Border Style="{StaticResource CardStyle}" Padding="10" Margin="0,0,0,8">
             <Grid>
               <Grid.ColumnDefinitions>
@@ -420,15 +459,22 @@
           </Border>
         </StackPanel>
 
-        <Border Style="{StaticResource ErrorCardStyle}" Background="{StaticResource DangerBackground}"
-                BorderBrush="{StaticResource DangerBorder}" MinHeight="72" MaxHeight="96">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource DangerForeground}" TextWrapping="Wrap"/>
-          </ScrollViewer>
-        </Border>
+        <Grid Grid.Row="4" Margin="0,0,0,16">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <TextBlock Text="エンコード設定" Style="{StaticResource SectionTitle}"/>
+          <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <TextBlock Text="{Binding EncodingSettingsText}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" FontSize="12" LineHeight="20"/>
+            </ScrollViewer>
+          </Border>
+        </Grid>
 
-        <Button Style="{StaticResource PrimaryButton}" Content="▶ エンコード開始" Command="{Binding EncodeCommand}" IsEnabled="{Binding CanEncode}" Margin="0,12,0,0"/>
-      </StackPanel>
+        <Button Grid.Row="5" Style="{StaticResource PrimaryButton}" Content="▶ エンコード開始" Command="{Binding EncodeCommand}" IsEnabled="{Binding CanEncode}"/>
+        <Button Grid.Row="6" Style="{StaticResource SecondaryButton}" Content="入力をクリア" Command="{Binding ClearInputsCommand}" Margin="0,8,0,0"/>
+      </Grid>
     </Grid>
 
         <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1,0,0,0">

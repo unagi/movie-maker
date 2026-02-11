@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media.Imaging;
@@ -31,6 +32,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ".mp3", ".wav", ".m4a", ".flac", ".aac"
     };
 
+    private static readonly Regex MultiWhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
+
+    private static readonly Regex[] TrailingNoisePatterns =
+    {
+        new(@"\s*[（(]\d+[)）]\s*$", RegexOptions.Compiled),
+        new(@"\s*(?:[-_]\s*)?(?:のコピー|コピー|copy)(?:\s*[（(]\d+[)）]|\s+\d+)?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase)
+    };
+
     private string _title = string.Empty;
     private string? _imagePath;
     private string? _audioPath;
@@ -45,10 +54,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _archiveDirectoryPath = string.Empty;
     private string _statusMessage = "準備してください";
     private string _audioInfoText = string.Empty;
+    private string? _autoFilledTitle;
     private double? _audioDurationSeconds;
     private bool _canEncode;
     private bool _isEncoding;
-    private bool _hasErrors;
+    private bool _isApplyingAutoTitle;
 
     private int _imageWidth;
     private int _imageHeight;
@@ -60,6 +70,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OpenSettingsCommand = new RelayCommand(_ => OpenSettings());
         OpenOutputFolderCommand = new RelayCommand(_ => OpenFolder(OutputDirectoryPath), _ => Directory.Exists(OutputDirectoryPath));
         OpenArchiveFolderCommand = new RelayCommand(_ => OpenFolder(ArchiveDirectoryPath), _ => Directory.Exists(ArchiveDirectoryPath));
+        ClearInputsCommand = new RelayCommand(_ => ClearInputs(), _ => CanClearInputs);
         EncodeCommand = new AsyncRelayCommand(EncodeAsync, () => CanEncode);
 
         UpdateSettingsLabels();
@@ -69,6 +80,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand OpenSettingsCommand { get; }
     public RelayCommand OpenOutputFolderCommand { get; }
     public RelayCommand OpenArchiveFolderCommand { get; }
+    public RelayCommand ClearInputsCommand { get; }
     public AsyncRelayCommand EncodeCommand { get; }
 
     public string Title
@@ -78,6 +90,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             if (_title == value) return;
             _title = value;
+            if (!_isApplyingAutoTitle)
+            {
+                _autoFilledTitle = null;
+            }
             OnPropertyChanged();
             UpdateValidation(true);
         }
@@ -216,16 +232,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool HasErrors
-    {
-        get => _hasErrors;
-        private set
-        {
-            if (_hasErrors == value) return;
-            _hasErrors = value;
-            OnPropertyChanged();
-        }
-    }
+    public bool CanClearInputs => !IsEncoding && (IsImageReady || IsAudioReady);
 
     public bool IsImageReady => !string.IsNullOrWhiteSpace(_imagePath);
     public string ImageStatusText
@@ -293,6 +300,53 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    public string EncodingSettingsText
+    {
+        get
+        {
+            var lines = new List<string>
+            {
+                "映像",
+                $"・出力解像度: {GetTargetResolutionText()}",
+                $"・向き判定: {GetOrientationText()}",
+                "・フレームレート: 30 fps",
+                "・ピクセル形式: yuv420p",
+                "・アスペクト処理: scale + setsar=1",
+                "・映像エンコーダ: NVENC/QSV/AMF優先、非対応時はlibx264",
+                string.Empty,
+                "音声",
+                "・コーデック: AAC",
+                "・ビットレート: 320 kbps",
+                "・サンプリング周波数: 48 kHz",
+                string.Empty,
+                "出力制御"
+            };
+
+            if (_orientation == VideoOrientation.Vertical)
+            {
+                if (_audioDurationSeconds.HasValue)
+                {
+                    lines.Add(_audioDurationSeconds.Value >= 180
+                        ? "・Shorts制限: 2:59に短縮（末尾1秒フェードアウト）"
+                        : "・Shorts制限: 短縮なし（3分未満）");
+                }
+                else
+                {
+                    lines.Add("・Shorts制限: 音声長の解析待ち");
+                }
+            }
+            else
+            {
+                lines.Add("・Shorts制限: 対象外（横動画）");
+            }
+
+            lines.Add("・終了条件: -shortest（短い入力長に合わせる）");
+            lines.Add("・Web最適化: +faststart");
+
+            return string.Join(Environment.NewLine, lines);
+        }
+    }
+
     public void HandleDrop(string[] files)
     {
         if (files == null || files.Length == 0)
@@ -337,6 +391,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             ImageFileLabel = $"画像: {Path.GetFileName(path)}";
             _imageWidth = bitmap.PixelWidth;
             _imageHeight = bitmap.PixelHeight;
+            TryAutoFillTitleFromImage(path);
 
             UpdateAspectInfo();
             NotifyStatusChanged();
@@ -364,6 +419,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
         AudioFileLabel = $"音楽: {Path.GetFileName(path)}";
         NotifyStatusChanged();
         _ = UpdateAudioInfoAsync(path);
+    }
+
+    private void ClearInputs()
+    {
+        _imagePath = null;
+        _audioPath = null;
+        _audioInfoText = string.Empty;
+        _audioDurationSeconds = null;
+        _imageWidth = 0;
+        _imageHeight = 0;
+        _orientation = null;
+        _aspectValid = false;
+
+        ImagePreview = null;
+        ImageFileLabel = "画像: 未設定";
+        AudioFileLabel = "音楽: 未設定";
+        OrientationLabel = "向き: 未判定";
+        AspectLabel = "比率: 未判定";
+
+        NotifyStatusChanged();
+        UpdateValidation(true);
     }
 
     private void UpdateAspectInfo()
@@ -472,12 +548,24 @@ public sealed class MainViewModel : INotifyPropertyChanged
             errors.Add("ffmpegが見つかりません (PATH)");
         }
 
-        HasErrors = errors.Count > 0;
-        CanEncode = errors.Count == 0 && !IsEncoding;
+        var hasErrors = errors.Count > 0;
+        CanEncode = !hasErrors && !IsEncoding;
+        ClearInputsCommand.RaiseCanExecuteChanged();
 
         if (updateStatus)
         {
-            StatusMessage = errors.Count == 0 ? "準備完了" : string.Join(Environment.NewLine, errors);
+            if (!hasErrors)
+            {
+                StatusMessage = "準備完了";
+            }
+            else if (string.IsNullOrWhiteSpace(title) && !IsImageReady && !IsAudioReady)
+            {
+                StatusMessage = "準備してください";
+            }
+            else
+            {
+                StatusMessage = "入力内容を確認してください";
+            }
         }
     }
 
@@ -489,6 +577,28 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(AudioStatusText));
         OnPropertyChanged(nameof(IsOutputReady));
         OnPropertyChanged(nameof(OutputStatusText));
+        OnPropertyChanged(nameof(EncodingSettingsText));
+        OnPropertyChanged(nameof(CanClearInputs));
+    }
+
+    private string GetTargetResolutionText()
+    {
+        return _orientation switch
+        {
+            VideoOrientation.Vertical => "1080x1920",
+            VideoOrientation.Horizontal => "1920x1080",
+            _ => "未確定"
+        };
+    }
+
+    private string GetOrientationText()
+    {
+        return _orientation switch
+        {
+            VideoOrientation.Vertical => "縦 (9:16)",
+            VideoOrientation.Horizontal => "横 (16:9)",
+            _ => "未判定"
+        };
     }
 
     private async Task UpdateAudioInfoAsync(string path)
@@ -593,6 +703,85 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         return false;
+    }
+
+    private void TryAutoFillTitleFromImage(string path)
+    {
+        var suggested = BuildTitleFromImageFileName(path);
+        if (string.IsNullOrWhiteSpace(suggested))
+        {
+            return;
+        }
+
+        var current = Title?.Trim() ?? string.Empty;
+        var shouldApply = string.IsNullOrWhiteSpace(current)
+            || (!string.IsNullOrWhiteSpace(_autoFilledTitle) &&
+                string.Equals(current, _autoFilledTitle, StringComparison.Ordinal));
+
+        if (!shouldApply)
+        {
+            return;
+        }
+
+        _isApplyingAutoTitle = true;
+        try
+        {
+            Title = suggested;
+            _autoFilledTitle = suggested;
+        }
+        finally
+        {
+            _isApplyingAutoTitle = false;
+        }
+    }
+
+    private static string BuildTitleFromImageFileName(string path)
+    {
+        var original = Path.GetFileNameWithoutExtension(path)?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(original))
+        {
+            return string.Empty;
+        }
+
+        var candidate = NormalizeWhitespace(original);
+
+        while (true)
+        {
+            var previous = candidate;
+            candidate = RemoveTrailingNoise(candidate);
+            if (candidate.Length == 0 || string.Equals(previous, candidate, StringComparison.Ordinal))
+            {
+                break;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(candidate) ? NormalizeWhitespace(original) : candidate;
+    }
+
+    private static string RemoveTrailingNoise(string value)
+    {
+        var result = value;
+
+        foreach (var pattern in TrailingNoisePatterns)
+        {
+            var replaced = pattern.Replace(result, string.Empty);
+            if (!string.Equals(replaced, result, StringComparison.Ordinal))
+            {
+                result = TrimTrailingSeparators(replaced);
+            }
+        }
+
+        return NormalizeWhitespace(result);
+    }
+
+    private static string NormalizeWhitespace(string value)
+    {
+        return MultiWhitespaceRegex.Replace(value.Replace('　', ' ').Trim(), " ");
+    }
+
+    private static string TrimTrailingSeparators(string value)
+    {
+        return value.TrimEnd(' ', '\t', '_', '-');
     }
 
     private void OpenSettings()
