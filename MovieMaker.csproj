@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -11,5 +11,11 @@
 
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="MovieMaker.Tests\**\*.cs" />
+    <Page Remove="MovieMaker.Tests\**\*.xaml" />
+    <EmbeddedResource Remove="MovieMaker.Tests\**\*" />
   </ItemGroup>
 </Project>

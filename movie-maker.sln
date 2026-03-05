@@ -1,0 +1,51 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MovieMaker", "MovieMaker.csproj", "{8443AABA-4331-F967-E16D-03261C8BDC3D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MovieMaker.Tests", "MovieMaker.Tests\MovieMaker.Tests.csproj", "{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Debug|x64.Build.0 = Debug|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Debug|x86.Build.0 = Debug|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Release|x64.ActiveCfg = Release|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Release|x64.Build.0 = Release|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Release|x86.ActiveCfg = Release|Any CPU
+		{8443AABA-4331-F967-E16D-03261C8BDC3D}.Release|x86.Build.0 = Release|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Debug|x64.Build.0 = Debug|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Debug|x86.Build.0 = Debug|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Release|x64.ActiveCfg = Release|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Release|x64.Build.0 = Release|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Release|x86.ActiveCfg = Release|Any CPU
+		{2DD265C2-2BD6-4565-8412-C9C1827E3D0B}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {BBC5A525-25F8-4FEC-83DF-07C3FB3FE97A}
+	EndGlobalSection
+EndGlobal
