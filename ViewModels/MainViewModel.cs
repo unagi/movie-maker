@@ -59,11 +59,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private bool _canEncode;
     private bool _isEncoding;
     private bool _isApplyingAutoTitle;
+    private EncodeProfile _selectedProfile = EncodeProfile.Standard;
 
     private int _imageWidth;
     private int _imageHeight;
     private VideoOrientation? _orientation;
     private bool _aspectValid;
+    private VideoOrientation _draftOrientation = VideoOrientation.Vertical;
 
     public MainViewModel()
     {
@@ -234,11 +236,130 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public bool CanClearInputs => !IsEncoding && (IsImageReady || IsAudioReady);
 
-    public bool IsImageReady => !string.IsNullOrWhiteSpace(_imagePath);
+    public EncodeProfile SelectedProfile
+    {
+        get => _selectedProfile;
+        set
+        {
+            if (_selectedProfile == value) return;
+            _selectedProfile = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(UseDraftMode));
+            OnPropertyChanged(nameof(IsStandardProfile));
+            OnPropertyChanged(nameof(IsCopyrightCheckProductionProfile));
+            OnPropertyChanged(nameof(IsDraftProfile));
+            OnPropertyChanged(nameof(IsDraftOrientationHorizontal));
+            OnPropertyChanged(nameof(IsDraftOrientationVertical));
+            NotifyStatusChanged();
+            UpdateValidation(true);
+        }
+    }
+
+    public bool UseDraftMode
+    {
+        get => SelectedProfile == EncodeProfile.DraftPreview;
+        set
+        {
+            if (value)
+            {
+                SelectedProfile = EncodeProfile.DraftPreview;
+            }
+            else if (SelectedProfile == EncodeProfile.DraftPreview)
+            {
+                SelectedProfile = EncodeProfile.Standard;
+            }
+        }
+    }
+
+    public bool IsStandardProfile
+    {
+        get => SelectedProfile == EncodeProfile.Standard;
+        set
+        {
+            if (value)
+            {
+                SelectedProfile = EncodeProfile.Standard;
+            }
+        }
+    }
+
+    public bool IsCopyrightCheckProductionProfile
+    {
+        get => SelectedProfile == EncodeProfile.CopyrightCheckProduction;
+        set
+        {
+            if (value)
+            {
+                SelectedProfile = EncodeProfile.CopyrightCheckProduction;
+            }
+        }
+    }
+
+    public bool IsDraftProfile
+    {
+        get => SelectedProfile == EncodeProfile.DraftPreview;
+        set
+        {
+            if (value)
+            {
+                SelectedProfile = EncodeProfile.DraftPreview;
+            }
+        }
+    }
+
+    public VideoOrientation DraftOrientation
+    {
+        get => _draftOrientation;
+        set
+        {
+            if (_draftOrientation == value) return;
+            _draftOrientation = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsDraftOrientationHorizontal));
+            OnPropertyChanged(nameof(IsDraftOrientationVertical));
+            NotifyStatusChanged();
+            UpdateValidation(true);
+        }
+    }
+
+    public bool IsDraftOrientationHorizontal
+    {
+        get => DraftOrientation == VideoOrientation.Horizontal;
+        set
+        {
+            if (value)
+            {
+                DraftOrientation = VideoOrientation.Horizontal;
+            }
+        }
+    }
+
+    public bool IsDraftOrientationVertical
+    {
+        get => DraftOrientation == VideoOrientation.Vertical;
+        set
+        {
+            if (value)
+            {
+                DraftOrientation = VideoOrientation.Vertical;
+            }
+        }
+    }
+
+    public bool ShowReplaceImageHint => SelectedProfile != EncodeProfile.DraftPreview && IsImageReady;
+
+    public bool IsImageReady => SelectedProfile == EncodeProfile.DraftPreview || !string.IsNullOrWhiteSpace(_imagePath);
     public string ImageStatusText
     {
         get
         {
+            if (SelectedProfile == EncodeProfile.DraftPreview)
+            {
+                return DraftOrientation == VideoOrientation.Vertical
+                    ? "仮画像を生成 (縦 540x960)"
+                    : "仮画像を生成 (横 960x540)";
+            }
+
             if (!IsImageReady)
             {
                 return "未設定";
@@ -274,26 +395,28 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool IsOutputReady => _aspectValid;
+    public bool IsOutputReady => SelectedProfile == EncodeProfile.DraftPreview || _aspectValid;
     public string OutputStatusText
     {
         get
         {
-            if (!_aspectValid || _orientation == null)
+            var orientation = GetEffectiveOrientation();
+            if (orientation == null || (SelectedProfile != EncodeProfile.DraftPreview && !_aspectValid))
             {
                 return "未判定";
             }
 
-            var label = _orientation == VideoOrientation.Vertical ? "YouTube Short" : "YouTube";
+            var label = GetOutputModeLabel(orientation.Value);
             if (!_audioDurationSeconds.HasValue)
             {
                 return $"{label} (時間未取得)";
             }
 
             var duration = _audioDurationSeconds.Value;
-            if (_orientation == VideoOrientation.Vertical && duration >= 180)
+            if (orientation == VideoOrientation.Vertical &&
+                ShortsPolicy.TryGetTrimTargetSeconds(duration, out var targetSeconds))
             {
-                duration = 179;
+                duration = targetSeconds;
             }
 
             return $"{label} ({FormatDuration(duration)})";
@@ -304,31 +427,33 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         get
         {
+            var options = EncodingOptionsResolver.Resolve(GetEffectiveOrientation() ?? DraftOrientation, GetSelectedProfile());
             var lines = new List<string>
             {
+                $"モード: {GetProfileDescription(GetSelectedProfile())}",
+                string.Empty,
                 "映像",
+                $"・ソース: {(SelectedProfile == EncodeProfile.DraftPreview ? "仮画像を自動生成" : "入力画像を使用")}",
                 $"・出力解像度: {GetTargetResolutionText()}",
                 $"・向き判定: {GetOrientationText()}",
-                "・フレームレート: 30 fps",
+                $"・フレームレート: {options.FrameRate} fps",
                 "・ピクセル形式: yuv420p",
                 "・アスペクト処理: scale + setsar=1",
                 "・映像エンコーダ: NVENC/QSV/AMF優先、非対応時はlibx264",
                 string.Empty,
                 "音声",
                 "・コーデック: AAC",
-                "・ビットレート: 320 kbps",
-                "・サンプリング周波数: 48 kHz",
+                $"・ビットレート: {options.AudioBitrate}",
+                $"・サンプリング周波数: {int.Parse(options.AudioSampleRate) / 1000.0:0.#} kHz",
                 string.Empty,
                 "出力制御"
             };
 
-            if (_orientation == VideoOrientation.Vertical)
+            if ((GetEffectiveOrientation() ?? DraftOrientation) == VideoOrientation.Vertical)
             {
                 if (_audioDurationSeconds.HasValue)
                 {
-                    lines.Add(_audioDurationSeconds.Value >= 180
-                        ? "・Shorts制限: 2:59に短縮（末尾1秒フェードアウト）"
-                        : "・Shorts制限: 短縮なし（3分未満）");
+                    lines.Add(GetShortsRuleText(_audioDurationSeconds.Value));
                 }
                 else
                 {
@@ -362,7 +487,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
 
             var ext = Path.GetExtension(file);
-            if (ImageExtensions.Contains(ext))
+            if (SelectedProfile != EncodeProfile.DraftPreview && ImageExtensions.Contains(ext))
             {
                 SetImage(file);
             }
@@ -531,9 +656,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         if (string.IsNullOrWhiteSpace(_imagePath))
         {
-            errors.Add("画像が未設定です");
+            if (SelectedProfile != EncodeProfile.DraftPreview)
+            {
+                errors.Add("画像が未設定です");
+            }
         }
-        else if (!_aspectValid)
+        else if (SelectedProfile != EncodeProfile.DraftPreview && !_aspectValid)
         {
             errors.Add("画像の比率が9:16または16:9ではありません");
         }
@@ -573,6 +701,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(IsImageReady));
         OnPropertyChanged(nameof(ImageStatusText));
+        OnPropertyChanged(nameof(ShowReplaceImageHint));
         OnPropertyChanged(nameof(IsAudioReady));
         OnPropertyChanged(nameof(AudioStatusText));
         OnPropertyChanged(nameof(IsOutputReady));
@@ -585,20 +714,66 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         return _orientation switch
         {
-            VideoOrientation.Vertical => "1080x1920",
-            VideoOrientation.Horizontal => "1920x1080",
-            _ => "未確定"
+            _ => BuildResolutionText(GetEffectiveOrientation() ?? DraftOrientation)
         };
+    }
+
+    private string BuildResolutionText(VideoOrientation orientation)
+    {
+        var options = EncodingOptionsResolver.Resolve(orientation, GetSelectedProfile());
+        return $"{options.Width}x{options.Height}";
+    }
+
+    private VideoOrientation? GetEffectiveOrientation()
+    {
+        return SelectedProfile == EncodeProfile.DraftPreview ? DraftOrientation : _orientation;
+    }
+
+    private EncodeProfile GetSelectedProfile()
+    {
+        return SelectedProfile;
     }
 
     private string GetOrientationText()
     {
-        return _orientation switch
+        return GetEffectiveOrientation() switch
         {
-            VideoOrientation.Vertical => "縦 (9:16)",
-            VideoOrientation.Horizontal => "横 (16:9)",
-            _ => "未判定"
+            VideoOrientation.Vertical => SelectedProfile == EncodeProfile.DraftPreview ? "縦 (仮画像)" : "縦 (9:16)",
+            VideoOrientation.Horizontal => SelectedProfile == EncodeProfile.DraftPreview ? "横 (仮画像)" : "横 (16:9)",
+            _ => "未確定"
         };
+    }
+
+    private static string GetProfileDescription(EncodeProfile profile)
+    {
+        return profile switch
+        {
+            EncodeProfile.Standard => "通常出力",
+            EncodeProfile.CopyrightCheckProduction => "本番画質・軽量音声 (本番解像度 / AAC 128kbps / 32kHz)",
+            EncodeProfile.DraftPreview => "仮動画 (仮画像 / 軽量画質 / AAC 128kbps / 32kHz)",
+            _ => "不明"
+        };
+    }
+
+    private string GetOutputModeLabel(VideoOrientation orientation)
+    {
+        var baseLabel = orientation == VideoOrientation.Vertical ? "YouTube Short" : "YouTube";
+        return SelectedProfile switch
+        {
+            EncodeProfile.CopyrightCheckProduction => $"本番画質・軽量音声 ({baseLabel})",
+            EncodeProfile.DraftPreview => $"仮動画 ({baseLabel})",
+            _ => baseLabel
+        };
+    }
+
+    private static string GetShortsRuleText(double durationSeconds)
+    {
+        if (ShortsPolicy.TryGetTrimTargetSeconds(durationSeconds, out var targetSeconds))
+        {
+            return $"・Shorts制限: {FormatDuration(targetSeconds)}に短縮（末尾1秒フェードアウト + 無音除去）";
+        }
+
+        return "・Shorts制限: 短縮なし（0:57未満、または1:00超2:57未満）";
     }
 
     private async Task UpdateAudioInfoAsync(string path)
@@ -807,7 +982,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (_orientation == null || _imagePath == null || _audioPath == null)
+        var orientation = GetEffectiveOrientation();
+        if (orientation == null || _audioPath == null)
         {
             StatusMessage = "入力が不足しています";
             return;
@@ -840,24 +1016,35 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Directory.CreateDirectory(outputFolder);
             Directory.CreateDirectory(archiveFolder);
 
-            File.Copy(_imagePath, Path.Combine(archiveFolder, Path.GetFileName(_imagePath)), overwrite: false);
+            var imagePath = _imagePath;
+            if (SelectedProfile == EncodeProfile.DraftPreview)
+            {
+                imagePath = PlaceholderImageService.CreateDraftPlaceholder(archiveFolder, title, orientation.Value, DateTime.Now);
+            }
+            else if (imagePath != null)
+            {
+                File.Copy(imagePath, Path.Combine(archiveFolder, Path.GetFileName(imagePath)), overwrite: false);
+            }
+
+            if (imagePath == null)
+            {
+                StatusMessage = "画像を準備できませんでした";
+                return;
+            }
+
             File.Copy(_audioPath, Path.Combine(archiveFolder, Path.GetFileName(_audioPath)), overwrite: false);
 
-            var outputPath = Path.Combine(outputFolder, $"{title}_{timestamp}.mp4");
+            var outputFileName = OutputNamingService.BuildOutputFileName(title, timestamp, GetSelectedProfile());
+            var outputPath = Path.Combine(outputFolder, outputFileName);
             var logPath = Path.Combine(EncodingService.GetLogDirectory(), $"{title}_{timestamp}.log");
-
-            var (width, height) = _orientation == VideoOrientation.Vertical
-                ? (1080, 1920)
-                : (1920, 1080);
 
             var request = new EncodeRequest(
                 ffmpegPath,
-                _imagePath,
+                imagePath,
                 _audioPath,
                 outputPath,
-                _orientation.Value,
-                width,
-                height,
+                orientation.Value,
+                GetSelectedProfile(),
                 logPath);
 
             var result = await EncodingService.EncodeAsync(request);

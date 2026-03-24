@@ -12,4 +12,9 @@
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="MovieMaker.Tests\**\*.cs" />
+    <None Include="MovieMaker.Tests\MovieMaker.Tests.csproj" />
+  </ItemGroup>
 </Project>

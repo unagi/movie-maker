@@ -6,21 +6,15 @@ namespace MovieMaker.Services;
 
 public static class SettingsService
 {
-    private static readonly string AppFolder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "MovieMaker");
-
-    private static readonly string SettingsPath = Path.Combine(AppFolder, "settings.json");
-
     public static AppSettings Current { get; private set; } = new();
 
     public static void Load()
     {
         try
         {
-            if (File.Exists(SettingsPath))
+            if (File.Exists(SettingsFilePath))
             {
-                var json = File.ReadAllText(SettingsPath);
+                var json = File.ReadAllText(SettingsFilePath);
                 var settings = JsonSerializer.Deserialize<AppSettings>(json);
                 if (settings != null)
                 {
@@ -36,15 +30,30 @@ public static class SettingsService
 
     public static void Save(AppSettings settings)
     {
-        Directory.CreateDirectory(AppFolder);
+        Directory.CreateDirectory(SettingsDirectory);
         var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
         {
             WriteIndented = true
         });
-        File.WriteAllText(SettingsPath, json);
+        File.WriteAllText(SettingsFilePath, json);
         Current = settings;
     }
 
-    public static string SettingsDirectory => AppFolder;
-    public static string SettingsFilePath => SettingsPath;
+    public static string SettingsDirectory
+    {
+        get
+        {
+            var overrideDirectory = Environment.GetEnvironmentVariable("MOVIEMAKER_SETTINGS_DIR");
+            if (!string.IsNullOrWhiteSpace(overrideDirectory))
+            {
+                return overrideDirectory;
+            }
+
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MovieMaker");
+        }
+    }
+
+    public static string SettingsFilePath => Path.Combine(SettingsDirectory, "settings.json");
 }

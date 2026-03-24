@@ -1,0 +1,151 @@
+using MovieMaker.Models;
+using MovieMaker.Services;
+using MovieMaker.ViewModels;
+using Xunit;
+
+namespace MovieMaker.Tests;
+
+public class MainViewModelDraftModeTests
+{
+    [Fact]
+    public void DraftMode_AllowsEncodingWithoutImage_WhenAudioAndPathsExist()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var audioPath = temp.CreateFile("sample.mp3");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true,
+            DraftOrientation = VideoOrientation.Horizontal
+        };
+
+        viewModel.HandleDrop(new[] { audioPath });
+
+        Assert.True(viewModel.IsImageReady);
+        Assert.True(viewModel.IsOutputReady);
+        Assert.True(viewModel.CanEncode);
+    }
+
+    [Fact]
+    public void StandardMode_StillRequiresImage()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var audioPath = temp.CreateFile("sample.mp3");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "standard-check"
+        };
+
+        viewModel.HandleDrop(new[] { audioPath });
+
+        Assert.False(viewModel.IsImageReady);
+        Assert.False(viewModel.CanEncode);
+    }
+
+    [Fact]
+    public void CopyrightCheckProductionMode_StillRequiresImage()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var audioPath = temp.CreateFile("sample.mp3");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "copyright-check",
+            SelectedProfile = EncodeProfile.CopyrightCheckProduction
+        };
+
+        viewModel.HandleDrop(new[] { audioPath });
+
+        Assert.False(viewModel.IsImageReady);
+        Assert.False(viewModel.CanEncode);
+    }
+
+    [Fact]
+    public void DraftMode_DefaultsToVerticalOrientation()
+    {
+        var viewModel = new MainViewModel
+        {
+            UseDraftMode = true
+        };
+
+        Assert.Equal(VideoOrientation.Vertical, viewModel.DraftOrientation);
+        Assert.True(viewModel.IsDraftOrientationVertical);
+        Assert.False(viewModel.IsDraftOrientationHorizontal);
+    }
+
+    [Fact]
+    public void CopyrightCheckProductionMode_UsesUpdatedLabel()
+    {
+        var viewModel = new MainViewModel
+        {
+            SelectedProfile = EncodeProfile.CopyrightCheckProduction
+        };
+
+        Assert.True(viewModel.EncodingSettingsText.Contains("本番画質・軽量音声", StringComparison.Ordinal));
+    }
+
+    private sealed class TestWorkspace : IDisposable
+    {
+        private readonly string _root = Path.Combine(Path.GetTempPath(), "MovieMakerTests", Guid.NewGuid().ToString("N"));
+        private readonly string _originalPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        private readonly string? _originalSettingsDir = Environment.GetEnvironmentVariable("MOVIEMAKER_SETTINGS_DIR");
+
+        public TestWorkspace()
+        {
+            Directory.CreateDirectory(_root);
+        }
+
+        public void PrepareSettings()
+        {
+            var output = Path.Combine(_root, "output");
+            var archive = Path.Combine(_root, "archive");
+            var settings = Path.Combine(_root, "settings");
+            Directory.CreateDirectory(output);
+            Directory.CreateDirectory(archive);
+            Directory.CreateDirectory(settings);
+            Environment.SetEnvironmentVariable("MOVIEMAKER_SETTINGS_DIR", settings);
+            SettingsService.Save(new AppSettings
+            {
+                OutputDirectory = output,
+                ArchiveDirectory = archive
+            });
+        }
+
+        public void PrepareFakeFfmpeg()
+        {
+            var ffmpegDir = Path.Combine(_root, "ffmpeg");
+            Directory.CreateDirectory(ffmpegDir);
+            File.WriteAllText(Path.Combine(ffmpegDir, "ffmpeg.exe"), string.Empty);
+            Environment.SetEnvironmentVariable("PATH", $"{ffmpegDir};{_originalPath}");
+        }
+
+        public string CreateFile(string name)
+        {
+            var path = Path.Combine(_root, name);
+            File.WriteAllText(path, "test");
+            return path;
+        }
+
+        public void Dispose()
+        {
+            Environment.SetEnvironmentVariable("PATH", _originalPath);
+            Environment.SetEnvironmentVariable("MOVIEMAKER_SETTINGS_DIR", _originalSettingsDir);
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            catch
+            {
+                // ignore cleanup failures
+            }
+        }
+    }
+}

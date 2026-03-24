@@ -16,8 +16,7 @@ public sealed record EncodeRequest(
     string AudioPath,
     string OutputPath,
     VideoOrientation Orientation,
-    int Width,
-    int Height,
+    EncodeProfile Profile,
     string LogPath);
 
 public sealed record EncodeResult(
@@ -37,10 +36,6 @@ public sealed record AudioInfo(
 
 public static class EncodingService
 {
-    private const double ShortsLimitSeconds = 180.0;
-    private const double ShortsTargetSeconds = 179.0;
-    private const double ShortsFadeSeconds = 1.0;
-
     private sealed record VideoEncoder(string Name, string DisplayName);
 
     private static readonly VideoEncoder LibX264 = new("libx264", "CPU (libx264)");
@@ -108,10 +103,10 @@ public static class EncodingService
             var logLock = new object();
 
             var candidates = await GetEncoderCandidatesAsync(request.FfmpegPath, logWriter, logLock);
-            var trimShorts = await ShouldTrimShortsAsync(request, logWriter, logLock);
+            var trimTargetSeconds = await ResolveShortsTrimTargetSecondsAsync(request, logWriter, logLock);
             foreach (var encoder in candidates)
             {
-                var psi = BuildStartInfo(request, encoder, trimShorts);
+                var psi = BuildStartInfo(request, encoder, trimTargetSeconds);
                 WriteLog(logWriter, logLock, $"Encoder: {encoder.DisplayName} ({encoder.Name})");
 
                 var (exitCode, succeeded) = await RunProcessAsync(psi, logWriter, logLock);
@@ -145,8 +140,9 @@ public static class EncodingService
         }
     }
 
-    private static ProcessStartInfo BuildStartInfo(EncodeRequest request, VideoEncoder encoder, bool trimShorts)
+    private static ProcessStartInfo BuildStartInfo(EncodeRequest request, VideoEncoder encoder, double? trimTargetSeconds)
     {
+        var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile);
         var psi = new ProcessStartInfo
         {
             FileName = request.FfmpegPath,
@@ -165,32 +161,32 @@ public static class EncodingService
 
         AddVideoEncoderArgs(psi, encoder, request);
 
-        var filter = BuildVideoFilter(request, trimShorts);
+        var filter = BuildVideoFilter(request, trimTargetSeconds);
         psi.ArgumentList.Add("-vf");
         psi.ArgumentList.Add(filter);
         psi.ArgumentList.Add("-r");
-        psi.ArgumentList.Add("30");
+        psi.ArgumentList.Add(options.FrameRate.ToString(CultureInfo.InvariantCulture));
         psi.ArgumentList.Add("-pix_fmt");
         psi.ArgumentList.Add("yuv420p");
 
-        if (trimShorts)
+        var audioFilter = BuildAudioFilter(trimTargetSeconds);
+        if (!string.IsNullOrWhiteSpace(audioFilter))
         {
-            var fadeStart = ShortsTargetSeconds - ShortsFadeSeconds;
             psi.ArgumentList.Add("-af");
-            psi.ArgumentList.Add($"afade=t=out:st={FormatSeconds(fadeStart)}:d={FormatSeconds(ShortsFadeSeconds)}");
+            psi.ArgumentList.Add(audioFilter);
         }
 
         psi.ArgumentList.Add("-c:a");
         psi.ArgumentList.Add("aac");
         psi.ArgumentList.Add("-b:a");
-        psi.ArgumentList.Add("320k");
+        psi.ArgumentList.Add(options.AudioBitrate);
         psi.ArgumentList.Add("-ar");
-        psi.ArgumentList.Add("48000");
+        psi.ArgumentList.Add(options.AudioSampleRate);
 
-        if (trimShorts)
+        if (trimTargetSeconds.HasValue)
         {
             psi.ArgumentList.Add("-t");
-            psi.ArgumentList.Add(FormatSeconds(ShortsTargetSeconds));
+            psi.ArgumentList.Add(FormatSeconds(trimTargetSeconds.Value));
         }
 
         psi.ArgumentList.Add("-shortest");
@@ -201,16 +197,32 @@ public static class EncodingService
         return psi;
     }
 
-    private static string BuildVideoFilter(EncodeRequest request, bool trimShorts)
+    private static string BuildVideoFilter(EncodeRequest request, double? trimTargetSeconds)
     {
-        var filter = $"scale={request.Width}:{request.Height},setsar=1";
-        if (trimShorts)
+        var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile);
+        var filter = $"scale={options.Width}:{options.Height},setsar=1";
+        if (trimTargetSeconds.HasValue)
         {
-            var fadeStart = ShortsTargetSeconds - ShortsFadeSeconds;
-            filter += $",fade=t=out:st={FormatSeconds(fadeStart)}:d={FormatSeconds(ShortsFadeSeconds)}";
+            var fadeStart = trimTargetSeconds.Value - ShortsPolicy.FadeSeconds;
+            filter += $",fade=t=out:st={FormatSeconds(fadeStart)}:d={FormatSeconds(ShortsPolicy.FadeSeconds)}";
         }
 
         return filter;
+    }
+
+    public static string? BuildAudioFilter(double? trimTargetSeconds)
+    {
+        if (!trimTargetSeconds.HasValue)
+        {
+            return null;
+        }
+
+        var fadeStart = trimTargetSeconds.Value - ShortsPolicy.FadeSeconds;
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"afade=t=out:st={FormatSeconds(fadeStart)}:d={FormatSeconds(ShortsPolicy.FadeSeconds)}," +
+            $"silenceremove=stop_periods=1:stop_duration={FormatSeconds(ShortsPolicy.TrailingSilenceDurationSeconds)}:" +
+            $"stop_threshold={ShortsPolicy.TrailingSilenceThreshold}");
     }
 
     public static async Task<AudioInfo?> GetAudioInfoAsync(string audioPath, string? ffmpegPath = null)
@@ -280,30 +292,30 @@ public static class EncodingService
         }
     }
 
-    private static async Task<bool> ShouldTrimShortsAsync(
+    private static async Task<double?> ResolveShortsTrimTargetSecondsAsync(
         EncodeRequest request,
         StreamWriter logWriter,
         object logLock)
     {
         if (request.Orientation != VideoOrientation.Vertical)
         {
-            return false;
+            return null;
         }
 
         var duration = await GetAudioDurationSecondsAsync(request.AudioPath, request.FfmpegPath, logWriter, logLock);
         if (!duration.HasValue)
         {
-            return false;
+            return null;
         }
 
-        if (duration.Value >= ShortsLimitSeconds)
+        if (ShortsPolicy.TryGetTrimTargetSeconds(duration.Value, out var targetSeconds))
         {
-            WriteLog(logWriter, logLock, $"Shorts trim enabled. Duration={FormatSeconds(duration.Value)}s");
-            return true;
+            WriteLog(logWriter, logLock, $"Shorts trim enabled. Duration={FormatSeconds(duration.Value)}s Target={FormatSeconds(targetSeconds)}s");
+            return targetSeconds;
         }
 
         WriteLog(logWriter, logLock, $"Shorts trim skipped. Duration={FormatSeconds(duration.Value)}s");
-        return false;
+        return null;
     }
 
     private static async Task<double?> GetAudioDurationSecondsAsync(
@@ -545,6 +557,7 @@ public static class EncodingService
 
     private static void AddVideoEncoderArgs(ProcessStartInfo psi, VideoEncoder encoder, EncodeRequest request)
     {
+        var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile);
         psi.ArgumentList.Add("-c:v");
         psi.ArgumentList.Add(encoder.Name);
 
@@ -553,20 +566,20 @@ public static class EncodingService
             psi.ArgumentList.Add("-tune");
             psi.ArgumentList.Add("stillimage");
             psi.ArgumentList.Add("-preset");
-            psi.ArgumentList.Add("medium");
+            psi.ArgumentList.Add(options.LibX264Preset);
             psi.ArgumentList.Add("-crf");
-            psi.ArgumentList.Add("18");
+            psi.ArgumentList.Add(options.LibX264Crf.ToString(CultureInfo.InvariantCulture));
             return;
         }
 
         if (encoder == Nvenc)
         {
             psi.ArgumentList.Add("-preset");
-            psi.ArgumentList.Add("p5");
+            psi.ArgumentList.Add(options.NvencPreset);
             psi.ArgumentList.Add("-rc");
             psi.ArgumentList.Add("vbr");
             psi.ArgumentList.Add("-cq");
-            psi.ArgumentList.Add("19");
+            psi.ArgumentList.Add(options.NvencCq.ToString(CultureInfo.InvariantCulture));
             psi.ArgumentList.Add("-b:v");
             psi.ArgumentList.Add("0");
             return;
@@ -575,24 +588,24 @@ public static class EncodingService
         if (encoder == Qsv)
         {
             psi.ArgumentList.Add("-preset");
-            psi.ArgumentList.Add("medium");
+            psi.ArgumentList.Add(options.QsvPreset);
             psi.ArgumentList.Add("-global_quality");
-            psi.ArgumentList.Add("19");
+            psi.ArgumentList.Add(options.QsvGlobalQuality.ToString(CultureInfo.InvariantCulture));
             return;
         }
 
         if (encoder == Amf)
         {
             psi.ArgumentList.Add("-quality");
-            psi.ArgumentList.Add("quality");
+            psi.ArgumentList.Add(options.AmfQuality);
             psi.ArgumentList.Add("-rc");
             psi.ArgumentList.Add("cqp");
             psi.ArgumentList.Add("-qp_i");
-            psi.ArgumentList.Add("19");
+            psi.ArgumentList.Add(options.AmfQp.ToString(CultureInfo.InvariantCulture));
             psi.ArgumentList.Add("-qp_p");
-            psi.ArgumentList.Add("19");
+            psi.ArgumentList.Add(options.AmfQp.ToString(CultureInfo.InvariantCulture));
             psi.ArgumentList.Add("-qp_b");
-            psi.ArgumentList.Add("19");
+            psi.ArgumentList.Add(options.AmfQp.ToString(CultureInfo.InvariantCulture));
         }
     }
 

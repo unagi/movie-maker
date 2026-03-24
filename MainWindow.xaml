@@ -287,6 +287,7 @@
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
           <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -299,8 +300,25 @@
                      Visibility="{Binding Title, Converter={StaticResource StringEmptyToVisibility}}"/>
         </Grid>
 
-        <TextBlock Grid.Row="2" Text="入力とプレビュー" Style="{StaticResource SectionTitle}"/>
-        <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="0"
+        <Border Grid.Row="2" Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+          <StackPanel>
+            <TextBlock Text="出力モード" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0"
+                        >
+              <RadioButton Content="通常" IsChecked="{Binding IsStandardProfile}" Margin="0,0,16,0"/>
+              <RadioButton Content="本番画質・軽量音声" IsChecked="{Binding IsCopyrightCheckProductionProfile}" Margin="0,0,16,0"/>
+              <RadioButton Content="仮動画" IsChecked="{Binding IsDraftProfile}"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0"
+                        Visibility="{Binding UseDraftMode, Converter={StaticResource BoolToVisibility}}">
+              <RadioButton Content="縦 9:16" IsChecked="{Binding IsDraftOrientationVertical}" Margin="0,0,16,0"/>
+              <RadioButton Content="横 16:9" IsChecked="{Binding IsDraftOrientationHorizontal}"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <TextBlock Grid.Row="3" Text="入力とプレビュー" Style="{StaticResource SectionTitle}"/>
+        <Border Grid.Row="4" Style="{StaticResource CardStyle}" Padding="0"
                 AllowDrop="True" Drop="DropArea_OnDrop" DragEnter="DropArea_OnDragEnter">
           <Grid Background="#F9FAFB">
             <Rectangle Margin="12" RadiusX="8" RadiusY="8" Stroke="#CBD5E1" StrokeThickness="1"
@@ -317,6 +335,9 @@
               </Border>
               <TextBlock Text="ここにファイルをドロップ" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center"/>
               <TextBlock Text="画像ファイルと音楽ファイルに対応" FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,4,0,12"/>
+              <TextBlock Text="仮動画モード中は画像なしでOK、音声だけドロップすれば仮画像を生成します"
+                         FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,0,0,12"
+                         Visibility="{Binding UseDraftMode, Converter={StaticResource BoolToVisibility}}"/>
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                 <Border Background="#EEF2FF" CornerRadius="16" Padding="10,4" Margin="0,0,8,0">
                   <TextBlock Text="JPG, PNG, WebP" FontSize="11" Foreground="#3B82F6"/>
@@ -329,7 +350,7 @@
 
             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
                     Background="#EEF2FF" CornerRadius="12" Padding="10,4"
-                    Visibility="{Binding IsImageReady, Converter={StaticResource BoolToVisibility}}">
+                    Visibility="{Binding ShowReplaceImageHint, Converter={StaticResource BoolToVisibility}}">
               <TextBlock Text="ドラッグ＆ドロップで差し替え" FontSize="11" Foreground="#3B82F6"/>
             </Border>
           </Grid>
