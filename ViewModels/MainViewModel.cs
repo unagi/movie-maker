@@ -628,6 +628,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         OpenOutputFolderCommand.RaiseCanExecuteChanged();
         OpenArchiveFolderCommand.RaiseCanExecuteChanged();
+        NotifyStatusChanged();
     }
 
     private void UpdateValidation(bool updateStatus)

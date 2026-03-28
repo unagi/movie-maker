@@ -1,6 +1,8 @@
 using MovieMaker.Models;
 using MovieMaker.Services;
 using MovieMaker.ViewModels;
+using System.ComponentModel;
+using System.Reflection;
 using Xunit;
 
 namespace MovieMaker.Tests;
@@ -92,11 +94,65 @@ public class MainViewModelDraftModeTests
         Assert.True(viewModel.EncodingSettingsText.Contains("本番画質・軽量音声", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void UpdatingSettingsLabels_RaisesStatusPropertiesForQueuedVideo()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+
+        var viewModel = new MainViewModel
+        {
+            UseDraftMode = true,
+            DraftOrientation = VideoOrientation.Vertical
+        };
+
+        SetPrivateField(viewModel, "_audioDurationSeconds", 58.0);
+
+        SettingsService.Save(new AppSettings
+        {
+            OutputDirectory = Path.Combine(temp.RootPath, "output"),
+            ArchiveDirectory = Path.Combine(temp.RootPath, "archive"),
+            OneMinuteShortsOffsetSeconds = 5.0,
+            ThreeMinuteShortsOffsetSeconds = 3.0
+        });
+
+        var changedProperties = new List<string>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+            {
+                changedProperties.Add(args.PropertyName);
+            }
+        };
+
+        InvokePrivateMethod(viewModel, "UpdateSettingsLabels");
+
+        Assert.Contains(nameof(MainViewModel.OutputStatusText), changedProperties);
+        Assert.Contains(nameof(MainViewModel.EncodingSettingsText), changedProperties);
+        Assert.Contains("(0:55)", viewModel.OutputStatusText, StringComparison.Ordinal);
+    }
+
+    private static void SetPrivateField(object target, string fieldName, object? value)
+    {
+        var field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field!.SetValue(target, value);
+    }
+
+    private static void InvokePrivateMethod(object target, string methodName)
+    {
+        var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method!.Invoke(target, null);
+    }
+
     private sealed class TestWorkspace : IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "MovieMakerTests", Guid.NewGuid().ToString("N"));
         private readonly string _originalPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         private readonly string? _originalSettingsDir = Environment.GetEnvironmentVariable("MOVIEMAKER_SETTINGS_DIR");
+
+        public string RootPath => _root;
 
         public TestWorkspace()
         {

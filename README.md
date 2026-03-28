@@ -72,6 +72,7 @@ bin\Release\net8.0-windows\win-x64\publish\
 
 ## ログ
 - `logs/` にffmpegのログを出力
+- 設定画面で 1分枠 / 3分枠 の Shorts オフセット秒を変更可能
 
 ## ライセンス
 GPLv3

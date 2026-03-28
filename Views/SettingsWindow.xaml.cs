@@ -40,7 +40,16 @@ public partial class SettingsWindow : Window
 
     private void Save_OnClick(object sender, RoutedEventArgs e)
     {
-        var settings = _viewModel.ToSettings();
+        if (!_viewModel.TryCreateSettings(out var settings, out var errorMessage))
+        {
+            System.Windows.MessageBox.Show(
+                errorMessage ?? "設定値を確認してください。",
+                "設定エラー",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(settings.OutputDirectory) ||
             string.IsNullOrWhiteSpace(settings.ArchiveDirectory))
         {

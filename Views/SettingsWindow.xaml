@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:conv="clr-namespace:MovieMaker.Converters"
-        Title="設定" Height="360" Width="640" ResizeMode="NoResize"
+        Title="設定" Height="520" Width="640" ResizeMode="NoResize"
         Background="Transparent" WindowStartupLocation="CenterOwner"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -131,7 +131,7 @@
           </Border>
           <StackPanel>
             <TextBlock Text="設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"/>
-            <TextBlock Text="出力先とアーカイブの保存先" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
+            <TextBlock Text="出力先、アーカイブ、Shortsオフセット" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
           </StackPanel>
         </StackPanel>
         <Button Grid.Column="1" Style="{StaticResource TitleBarButton}"
@@ -160,7 +160,7 @@
         </Grid>
       </Border>
 
-      <Border Style="{StaticResource CardStyle}">
+      <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
@@ -178,6 +178,39 @@
           </StackPanel>
           <Button Grid.Column="2" Content="参照" Width="70" Height="32" Style="{StaticResource SecondaryButton}" Click="BrowseArchive_OnClick"/>
         </Grid>
+      </Border>
+
+      <Border Style="{StaticResource CardStyle}">
+        <StackPanel>
+          <TextBlock Text="Shortsオフセット秒" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+          <TextBlock Text="1分枠、3分枠から何秒安全側に引くかを設定します。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,12"/>
+
+          <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="120"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,12,0">
+              <TextBlock Text="1分Shortsオフセット" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+              <TextBlock Text="例: 3.0 にすると 1:00 の枠を 0:57.0 に短縮" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0"/>
+            </StackPanel>
+            <TextBox Grid.Column="1" Text="{Binding OneMinuteShortsOffsetSeconds, UpdateSourceTrigger=PropertyChanged}"
+                     Height="32" Padding="8,4" BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+          </Grid>
+
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="120"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,12,0">
+              <TextBlock Text="3分Shortsオフセット" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+              <TextBlock Text="例: 3.0 にすると 3:00 の枠を 2:57.0 に短縮" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0"/>
+            </StackPanel>
+            <TextBox Grid.Column="1" Text="{Binding ThreeMinuteShortsOffsetSeconds, UpdateSourceTrigger=PropertyChanged}"
+                     Height="32" Padding="8,4" BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+          </Grid>
+        </StackPanel>
       </Border>
     </StackPanel>
 
