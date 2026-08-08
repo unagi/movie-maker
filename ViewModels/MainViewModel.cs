@@ -42,7 +42,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private string _title = string.Empty;
     private string? _imagePath;
-    private string? _audioPath;
+    private readonly List<string> _audioPaths = [];
     private BitmapImage? _imagePreview;
     private string _imageFileLabel = "画像: 未設定";
     private string _audioFileLabel = "音楽: 未設定";
@@ -60,12 +60,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private bool _isEncoding;
     private bool _isApplyingAutoTitle;
     private EncodeProfile _selectedProfile = EncodeProfile.Standard;
+    private DraftAudioQuality _draftAudioQuality = DraftAudioQuality.High;
 
     private int _imageWidth;
     private int _imageHeight;
     private VideoOrientation? _orientation;
     private bool _aspectValid;
-    private VideoOrientation _draftOrientation = VideoOrientation.Vertical;
+    private VideoOrientation _draftOrientation = VideoOrientation.Horizontal;
 
     public MainViewModel()
     {
@@ -250,6 +251,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(IsDraftProfile));
             OnPropertyChanged(nameof(IsDraftOrientationHorizontal));
             OnPropertyChanged(nameof(IsDraftOrientationVertical));
+            OnPropertyChanged(nameof(IsDraftAudioQualityHigh));
+            OnPropertyChanged(nameof(IsDraftAudioQualityLow));
             NotifyStatusChanged();
             UpdateValidation(true);
         }
@@ -322,6 +325,50 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool IsDraftAudioQualityHigh
+    {
+        get => _draftAudioQuality == DraftAudioQuality.High;
+        set
+        {
+            if (!value)
+            {
+                return;
+            }
+
+            if (_draftAudioQuality == DraftAudioQuality.High)
+            {
+                return;
+            }
+
+            _draftAudioQuality = DraftAudioQuality.High;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsDraftAudioQualityLow));
+            NotifyStatusChanged();
+        }
+    }
+
+    public bool IsDraftAudioQualityLow
+    {
+        get => _draftAudioQuality == DraftAudioQuality.Low;
+        set
+        {
+            if (!value)
+            {
+                return;
+            }
+
+            if (_draftAudioQuality == DraftAudioQuality.Low)
+            {
+                return;
+            }
+
+            _draftAudioQuality = DraftAudioQuality.Low;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsDraftAudioQualityHigh));
+            NotifyStatusChanged();
+        }
+    }
+
     public bool IsDraftOrientationHorizontal
     {
         get => DraftOrientation == VideoOrientation.Horizontal;
@@ -355,9 +402,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             if (SelectedProfile == EncodeProfile.DraftPreview)
             {
-                return DraftOrientation == VideoOrientation.Vertical
-                    ? "仮画像を生成 (縦 540x960)"
-                    : "仮画像を生成 (横 960x540)";
+                return "仮画像を生成 (横 960x540)";
             }
 
             if (!IsImageReady)
@@ -375,7 +420,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool IsAudioReady => !string.IsNullOrWhiteSpace(_audioPath);
+    public bool IsAudioReady => _audioPaths.Count > 0;
     public string AudioStatusText
     {
         get
@@ -385,7 +430,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return "未設定";
             }
 
-            var name = Path.GetFileName(_audioPath!);
+            if (_audioPaths.Count > 1)
+            {
+                return string.IsNullOrWhiteSpace(_audioInfoText)
+                    ? $"{_audioPaths.Count}ファイル"
+                    : $"{_audioPaths.Count}ファイル ({_audioInfoText})";
+            }
+
+            var name = Path.GetFileName(_audioPaths[0]);
             if (string.IsNullOrWhiteSpace(_audioInfoText))
             {
                 return name;
@@ -427,7 +479,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         get
         {
-            var options = EncodingOptionsResolver.Resolve(GetEffectiveOrientation() ?? DraftOrientation, GetSelectedProfile());
+            var options = EncodingOptionsResolver.Resolve(GetEffectiveOrientation() ?? DraftOrientation, GetSelectedProfile(), _draftAudioQuality);
             var lines = new List<string>
             {
                 $"モード: {GetProfileDescription(GetSelectedProfile())}",
@@ -443,6 +495,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 string.Empty,
                 "音声",
                 "・コーデック: AAC",
+                $"・入力: {(_audioPaths.Count > 1 ? $"{_audioPaths.Count}ファイルをファイル名順で連結" : "単一ファイル")}",
                 $"・ビットレート: {options.AudioBitrate}",
                 $"・サンプリング周波数: {int.Parse(options.AudioSampleRate) / 1000.0:0.#} kHz",
                 string.Empty,
@@ -479,6 +532,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
+        var audioFiles = new List<string>();
         foreach (var file in files)
         {
             if (!File.Exists(file))
@@ -493,7 +547,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
             else if (AudioExtensions.Contains(ext))
             {
-                SetAudio(file);
+                audioFiles.Add(file);
+            }
+        }
+
+        if (audioFiles.Count > 0)
+        {
+            if (SelectedProfile == EncodeProfile.DraftPreview)
+            {
+                SetAudioFiles(audioFiles);
+            }
+            else
+            {
+                SetAudio(audioFiles[^1]);
             }
         }
 
@@ -538,18 +604,30 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void SetAudio(string path)
     {
-        _audioPath = path;
+        SetAudioFiles([path]);
+    }
+
+    private void SetAudioFiles(IEnumerable<string> paths)
+    {
+        _audioPaths.Clear();
+        _audioPaths.AddRange(paths
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase));
         _audioInfoText = "解析中...";
         _audioDurationSeconds = null;
-        AudioFileLabel = $"音楽: {Path.GetFileName(path)}";
+        AudioFileLabel = _audioPaths.Count <= 1
+            ? $"音楽: {Path.GetFileName(_audioPaths[0])}"
+            : $"音楽: {_audioPaths.Count}ファイル";
         NotifyStatusChanged();
-        _ = UpdateAudioInfoAsync(path);
+        _ = UpdateAudioInfoAsync(_audioPaths.ToArray());
     }
 
     private void ClearInputs()
     {
         _imagePath = null;
-        _audioPath = null;
+        _audioPaths.Clear();
         _audioInfoText = string.Empty;
         _audioDurationSeconds = null;
         _imageWidth = 0;
@@ -667,7 +745,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             errors.Add("画像の比率が9:16または16:9ではありません");
         }
 
-        if (string.IsNullOrWhiteSpace(_audioPath))
+        if (_audioPaths.Count == 0)
         {
             errors.Add("音楽が未設定です");
         }
@@ -727,7 +805,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private VideoOrientation? GetEffectiveOrientation()
     {
-        return SelectedProfile == EncodeProfile.DraftPreview ? DraftOrientation : _orientation;
+        return SelectedProfile == EncodeProfile.DraftPreview ? VideoOrientation.Horizontal : _orientation;
     }
 
     private EncodeProfile GetSelectedProfile()
@@ -740,7 +818,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return GetEffectiveOrientation() switch
         {
             VideoOrientation.Vertical => SelectedProfile == EncodeProfile.DraftPreview ? "縦 (仮画像)" : "縦 (9:16)",
-            VideoOrientation.Horizontal => SelectedProfile == EncodeProfile.DraftPreview ? "横 (仮画像)" : "横 (16:9)",
+            VideoOrientation.Horizontal => SelectedProfile == EncodeProfile.DraftPreview ? "横 (仮画像・固定)" : "横 (16:9)",
             _ => "未確定"
         };
     }
@@ -751,7 +829,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             EncodeProfile.Standard => "通常出力",
             EncodeProfile.CopyrightCheckProduction => "本番画質・軽量音声 (本番解像度 / AAC 128kbps / 32kHz)",
-            EncodeProfile.DraftPreview => "仮動画 (仮画像 / 軽量画質 / AAC 128kbps / 32kHz)",
+            EncodeProfile.DraftPreview => "仮動画 (仮画像 / 軽量画質 / 音質切替可)",
             _ => "不明"
         };
     }
@@ -777,27 +855,85 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return "・Shorts制限: 短縮なし（0:57未満、または1:00超2:57未満）";
     }
 
-    private async Task UpdateAudioInfoAsync(string path)
+    private async Task UpdateAudioInfoAsync(IReadOnlyList<string> paths)
     {
         var ffmpegPath = EncodingService.ResolveFfmpegPath();
-        var info = await EncodingService.GetAudioInfoAsync(path, ffmpegPath);
+        var infos = new List<AudioInfo?>();
+        foreach (var path in paths)
+        {
+            infos.Add(await EncodingService.GetAudioInfoAsync(path, ffmpegPath));
+        }
 
-        if (!string.Equals(_audioPath, path, StringComparison.OrdinalIgnoreCase))
+        if (!AreSameAudioPaths(paths))
         {
             return;
         }
 
-        if (info == null)
+        if (paths.Count == 1)
         {
-            _audioInfoText = "情報取得不可";
-            _audioDurationSeconds = null;
+            var info = infos[0];
+            if (info == null)
+            {
+                _audioInfoText = "情報取得不可";
+                _audioDurationSeconds = null;
+            }
+            else
+            {
+                _audioInfoText = FormatAudioInfo(info);
+                _audioDurationSeconds = info.DurationSeconds;
+            }
         }
         else
         {
-            _audioInfoText = FormatAudioInfo(info);
-            _audioDurationSeconds = info.DurationSeconds;
+            _audioInfoText = FormatCombinedAudioInfo(infos);
+            _audioDurationSeconds = GetCombinedDurationSeconds(infos);
         }
         NotifyStatusChanged();
+    }
+
+    private bool AreSameAudioPaths(IReadOnlyList<string> paths)
+    {
+        if (_audioPaths.Count != paths.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < paths.Count; i++)
+        {
+            if (!string.Equals(_audioPaths[i], paths[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string FormatCombinedAudioInfo(IReadOnlyList<AudioInfo?> infos)
+    {
+        var totalDuration = GetCombinedDurationSeconds(infos);
+        if (totalDuration.HasValue)
+        {
+            return $"合計 {FormatDuration(totalDuration.Value)}";
+        }
+
+        return infos.Any(info => info != null) ? "一部情報取得不可" : "情報取得不可";
+    }
+
+    private static double? GetCombinedDurationSeconds(IReadOnlyList<AudioInfo?> infos)
+    {
+        double total = 0;
+        foreach (var info in infos)
+        {
+            if (info?.DurationSeconds == null)
+            {
+                return null;
+            }
+
+            total += info.DurationSeconds.Value;
+        }
+
+        return total;
     }
 
     private static string FormatAudioInfo(AudioInfo info)
@@ -984,7 +1120,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         var orientation = GetEffectiveOrientation();
-        if (orientation == null || _audioPath == null)
+        if (orientation == null || _audioPaths.Count == 0)
         {
             StatusMessage = "入力が不足しています";
             return;
@@ -1033,7 +1169,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            File.Copy(_audioPath, Path.Combine(archiveFolder, Path.GetFileName(_audioPath)), overwrite: false);
+            foreach (var audioPath in _audioPaths)
+            {
+                File.Copy(audioPath, Path.Combine(archiveFolder, Path.GetFileName(audioPath)), overwrite: false);
+            }
 
             var outputFileName = OutputNamingService.BuildOutputFileName(title, timestamp, GetSelectedProfile());
             var outputPath = Path.Combine(outputFolder, outputFileName);
@@ -1042,11 +1181,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var request = new EncodeRequest(
                 ffmpegPath,
                 imagePath,
-                _audioPath,
+                _audioPaths.ToArray(),
                 outputPath,
                 orientation.Value,
                 GetSelectedProfile(),
-                logPath);
+                logPath,
+                _draftAudioQuality);
 
             var result = await EncodingService.EncodeAsync(request);
 

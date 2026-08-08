@@ -13,11 +13,12 @@ namespace MovieMaker.Services;
 public sealed record EncodeRequest(
     string FfmpegPath,
     string ImagePath,
-    string AudioPath,
+    IReadOnlyList<string> AudioPaths,
     string OutputPath,
     VideoOrientation Orientation,
     EncodeProfile Profile,
-    string LogPath);
+    string LogPath,
+    DraftAudioQuality DraftAudioQuality);
 
 public sealed record EncodeResult(
     bool Success,
@@ -142,7 +143,7 @@ public static class EncodingService
 
     private static ProcessStartInfo BuildStartInfo(EncodeRequest request, VideoEncoder encoder, double? trimTargetSeconds)
     {
-        var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile);
+        var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile, request.DraftAudioQuality);
         var psi = new ProcessStartInfo
         {
             FileName = request.FfmpegPath,
@@ -156,8 +157,11 @@ public static class EncodingService
         psi.ArgumentList.Add("1");
         psi.ArgumentList.Add("-i");
         psi.ArgumentList.Add(request.ImagePath);
-        psi.ArgumentList.Add("-i");
-        psi.ArgumentList.Add(request.AudioPath);
+        foreach (var audioPath in request.AudioPaths)
+        {
+            psi.ArgumentList.Add("-i");
+            psi.ArgumentList.Add(audioPath);
+        }
 
         AddVideoEncoderArgs(psi, encoder, request);
 
@@ -169,11 +173,21 @@ public static class EncodingService
         psi.ArgumentList.Add("-pix_fmt");
         psi.ArgumentList.Add("yuv420p");
 
-        var audioFilter = BuildAudioFilter(trimTargetSeconds);
-        if (!string.IsNullOrWhiteSpace(audioFilter))
+        var audioFilterComplex = BuildAudioFilterComplex(request.AudioPaths.Count, trimTargetSeconds);
+        psi.ArgumentList.Add("-map");
+        psi.ArgumentList.Add("0:v:0");
+
+        if (!string.IsNullOrWhiteSpace(audioFilterComplex))
         {
-            psi.ArgumentList.Add("-af");
-            psi.ArgumentList.Add(audioFilter);
+            psi.ArgumentList.Add("-filter_complex");
+            psi.ArgumentList.Add(audioFilterComplex);
+            psi.ArgumentList.Add("-map");
+            psi.ArgumentList.Add("[aout]");
+        }
+        else
+        {
+            psi.ArgumentList.Add("-map");
+            psi.ArgumentList.Add("1:a:0");
         }
 
         psi.ArgumentList.Add("-c:a");
@@ -223,6 +237,42 @@ public static class EncodingService
             $"afade=t=out:st={FormatSeconds(fadeStart)}:d={FormatSeconds(ShortsPolicy.FadeSeconds)}," +
             $"silenceremove=stop_periods=1:stop_duration={FormatSeconds(ShortsPolicy.TrailingSilenceDurationSeconds)}:" +
             $"stop_threshold={ShortsPolicy.TrailingSilenceThreshold}");
+    }
+
+    public static string? BuildAudioFilterComplex(int audioInputCount, double? trimTargetSeconds)
+    {
+        if (audioInputCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(audioInputCount));
+        }
+
+        var audioFilter = BuildAudioFilter(trimTargetSeconds);
+        if (audioInputCount == 1)
+        {
+            if (string.IsNullOrWhiteSpace(audioFilter))
+            {
+                return null;
+            }
+
+            return $"[1:a]{audioFilter}[aout]";
+        }
+
+        var concatInputs = new StringBuilder();
+        for (var i = 1; i <= audioInputCount; i++)
+        {
+            concatInputs.Append('[').Append(i).Append(":a]");
+        }
+
+        var concat = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{concatInputs}concat=n={audioInputCount}:v=0:a=1[a_concat]");
+
+        if (string.IsNullOrWhiteSpace(audioFilter))
+        {
+            return $"{concatInputs}concat=n={audioInputCount}:v=0:a=1[aout]";
+        }
+
+        return $"{concat};[a_concat]{audioFilter}[aout]";
     }
 
     public static async Task<AudioInfo?> GetAudioInfoAsync(string audioPath, string? ffmpegPath = null)
@@ -302,7 +352,7 @@ public static class EncodingService
             return null;
         }
 
-        var duration = await GetAudioDurationSecondsAsync(request.AudioPath, request.FfmpegPath, logWriter, logLock);
+        var duration = await GetAudioDurationSecondsAsync(request.AudioPaths, request.FfmpegPath, logWriter, logLock);
         if (!duration.HasValue)
         {
             return null;
@@ -319,11 +369,16 @@ public static class EncodingService
     }
 
     private static async Task<double?> GetAudioDurationSecondsAsync(
-        string audioPath,
+        IReadOnlyList<string> audioPaths,
         string? ffmpegPath,
         StreamWriter? logWriter,
         object? logLock)
     {
+        if (audioPaths.Count == 0)
+        {
+            return null;
+        }
+
         var ffprobePath = ResolveFfprobePath(ffmpegPath);
         if (ffprobePath == null)
         {
@@ -333,38 +388,45 @@ public static class EncodingService
 
         try
         {
-            var document = await RunFfprobeJsonAsync(ffprobePath, new[]
+            double totalSeconds = 0;
+            foreach (var audioPath in audioPaths)
             {
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "json",
-                audioPath
-            });
-
-            if (document == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                var format = document.RootElement.GetProperty("format");
-                if (format.TryGetProperty("duration", out var durationElement))
+                var document = await RunFfprobeJsonAsync(ffprobePath, new[]
                 {
-                    var durationText = durationElement.GetString();
-                    if (double.TryParse(durationText, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
-                    {
-                        return seconds;
-                    }
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "json",
+                    audioPath
+                });
+
+                if (document == null)
+                {
+                    return null;
                 }
 
-                TryLog(logWriter, logLock, "ffprobe duration parse failed.");
-                return null;
+                try
+                {
+                    var format = document.RootElement.GetProperty("format");
+                    if (format.TryGetProperty("duration", out var durationElement))
+                    {
+                        var durationText = durationElement.GetString();
+                        if (double.TryParse(durationText, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+                        {
+                            totalSeconds += seconds;
+                            continue;
+                        }
+                    }
+
+                    TryLog(logWriter, logLock, "ffprobe duration parse failed.");
+                    return null;
+                }
+                finally
+                {
+                    document.Dispose();
+                }
             }
-            finally
-            {
-                document.Dispose();
-            }
+
+            return totalSeconds;
         }
         catch (Exception ex)
         {
@@ -557,7 +619,7 @@ public static class EncodingService
 
     private static void AddVideoEncoderArgs(ProcessStartInfo psi, VideoEncoder encoder, EncodeRequest request)
     {
-        var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile);
+        var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile, request.DraftAudioQuality);
         psi.ArgumentList.Add("-c:v");
         psi.ArgumentList.Add(encoder.Name);
 

@@ -20,8 +20,7 @@ public class MainViewModelDraftModeTests
         var viewModel = new MainViewModel
         {
             Title = "draft-check",
-            UseDraftMode = true,
-            DraftOrientation = VideoOrientation.Horizontal
+            UseDraftMode = true
         };
 
         viewModel.HandleDrop(new[] { audioPath });
@@ -71,16 +70,16 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
-    public void DraftMode_DefaultsToVerticalOrientation()
+    public void DraftMode_UsesHorizontalOutputByDefault()
     {
         var viewModel = new MainViewModel
         {
             UseDraftMode = true
         };
 
-        Assert.Equal(VideoOrientation.Vertical, viewModel.DraftOrientation);
-        Assert.True(viewModel.IsDraftOrientationVertical);
-        Assert.False(viewModel.IsDraftOrientationHorizontal);
+        Assert.True(viewModel.IsDraftOrientationHorizontal);
+        Assert.False(viewModel.IsDraftOrientationVertical);
+        Assert.Contains("横", viewModel.ImageStatusText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -95,6 +94,44 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
+    public void DraftMode_AcceptsMultipleAudioFilesInFileNameOrder()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var later = temp.CreateFile("z-last.mp3");
+        var earlier = temp.CreateFile("a-first.wav");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true
+        };
+
+        viewModel.HandleDrop(new[] { later, earlier });
+
+        var audioPaths = GetPrivateField<List<string>>(viewModel, "_audioPaths");
+
+        Assert.Equal(new[] { earlier, later }, audioPaths);
+        Assert.Equal("音楽: 2ファイル", viewModel.AudioFileLabel);
+        Assert.Contains("2ファイル", viewModel.AudioStatusText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DraftMode_DefaultsToHighAudioQuality()
+    {
+        var viewModel = new MainViewModel
+        {
+            UseDraftMode = true
+        };
+
+        Assert.True(viewModel.IsDraftAudioQualityHigh);
+        Assert.False(viewModel.IsDraftAudioQualityLow);
+        Assert.Contains("256k", viewModel.EncodingSettingsText, StringComparison.Ordinal);
+        Assert.Contains("44.1 kHz", viewModel.EncodingSettingsText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UpdatingSettingsLabels_RaisesStatusPropertiesForQueuedVideo()
     {
         using var temp = new TestWorkspace();
@@ -102,10 +139,11 @@ public class MainViewModelDraftModeTests
 
         var viewModel = new MainViewModel
         {
-            UseDraftMode = true,
-            DraftOrientation = VideoOrientation.Vertical
+            SelectedProfile = EncodeProfile.Standard
         };
 
+        SetPrivateField(viewModel, "_orientation", VideoOrientation.Vertical);
+        SetPrivateField(viewModel, "_aspectValid", true);
         SetPrivateField(viewModel, "_audioDurationSeconds", 58.0);
 
         SettingsService.Save(new AppSettings
@@ -137,6 +175,13 @@ public class MainViewModelDraftModeTests
         var field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(field);
         field!.SetValue(target, value);
+    }
+
+    private static T GetPrivateField<T>(object target, string fieldName)
+    {
+        var field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return Assert.IsType<T>(field!.GetValue(target));
     }
 
     private static void InvokePrivateMethod(object target, string methodName)

@@ -4,18 +4,22 @@ namespace MovieMaker.Services;
 
 public static class EncodingOptionsResolver
 {
-    public static EncodingOptions Resolve(VideoOrientation orientation, EncodeProfile profile)
+    public static EncodingOptions Resolve(
+        VideoOrientation orientation,
+        EncodeProfile profile,
+        DraftAudioQuality draftAudioQuality = DraftAudioQuality.High)
     {
         var isVertical = orientation == VideoOrientation.Vertical;
 
         if (profile == EncodeProfile.DraftPreview)
         {
+            var useHighAudio = draftAudioQuality == DraftAudioQuality.High;
             return new EncodingOptions(
                 isVertical ? 540 : 960,
                 isVertical ? 960 : 540,
                 24,
-                "128k",
-                "32000",
+                useHighAudio ? "256k" : "128k",
+                useHighAudio ? "44100" : "32000",
                 "veryfast",
                 32,
                 "p1",

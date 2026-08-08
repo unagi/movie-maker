@@ -9,10 +9,13 @@ public class EncodingOptionsResolverTests
     [Fact]
     public void DraftPreview_UsesLowResolutionAndFastSettings()
     {
-        var options = EncodingOptionsResolver.Resolve(VideoOrientation.Horizontal, EncodeProfile.DraftPreview);
+        var options = EncodingOptionsResolver.Resolve(
+            VideoOrientation.Vertical,
+            EncodeProfile.DraftPreview,
+            DraftAudioQuality.Low);
 
-        Assert.Equal(960, options.Width);
-        Assert.Equal(540, options.Height);
+        Assert.Equal(540, options.Width);
+        Assert.Equal(960, options.Height);
         Assert.Equal(24, options.FrameRate);
         Assert.Equal("128k", options.AudioBitrate);
         Assert.Equal("32000", options.AudioSampleRate);
@@ -21,9 +24,24 @@ public class EncodingOptionsResolverTests
     }
 
     [Fact]
+    public void DraftPreviewHighAudio_Uses44100HzAnd256kbps()
+    {
+        var options = EncodingOptionsResolver.Resolve(
+            VideoOrientation.Vertical,
+            EncodeProfile.DraftPreview,
+            DraftAudioQuality.High);
+
+        Assert.Equal(540, options.Width);
+        Assert.Equal(960, options.Height);
+        Assert.Equal(24, options.FrameRate);
+        Assert.Equal("256k", options.AudioBitrate);
+        Assert.Equal("44100", options.AudioSampleRate);
+    }
+
+    [Fact]
     public void StandardVertical_KeepsCurrentQualityDefaults()
     {
-        var options = EncodingOptionsResolver.Resolve(VideoOrientation.Vertical, EncodeProfile.Standard);
+        var options = EncodingOptionsResolver.Resolve(VideoOrientation.Vertical, EncodeProfile.Standard, DraftAudioQuality.Low);
 
         Assert.Equal(1080, options.Width);
         Assert.Equal(1920, options.Height);
@@ -37,7 +55,7 @@ public class EncodingOptionsResolverTests
     [Fact]
     public void CopyrightCheckProduction_UsesProductionResolutionAndCheckAudioSettings()
     {
-        var options = EncodingOptionsResolver.Resolve(VideoOrientation.Vertical, EncodeProfile.CopyrightCheckProduction);
+        var options = EncodingOptionsResolver.Resolve(VideoOrientation.Vertical, EncodeProfile.CopyrightCheckProduction, DraftAudioQuality.Low);
 
         Assert.Equal(1080, options.Width);
         Assert.Equal(1920, options.Height);

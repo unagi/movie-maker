@@ -311,8 +311,8 @@
             </StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,10,0,0"
                         Visibility="{Binding UseDraftMode, Converter={StaticResource BoolToVisibility}}">
-              <RadioButton Content="縦 9:16" IsChecked="{Binding IsDraftOrientationVertical}" Margin="0,0,16,0"/>
-              <RadioButton Content="横 16:9" IsChecked="{Binding IsDraftOrientationHorizontal}"/>
+              <RadioButton Content="高音質 (44.1kHz / 256kbps)" IsChecked="{Binding IsDraftAudioQualityHigh}" Margin="0,0,16,0"/>
+              <RadioButton Content="低音質 (32kHz / 128kbps)" IsChecked="{Binding IsDraftAudioQualityLow}"/>
             </StackPanel>
           </StackPanel>
         </Border>
@@ -335,7 +335,7 @@
               </Border>
               <TextBlock Text="ここにファイルをドロップ" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center"/>
               <TextBlock Text="画像ファイルと音楽ファイルに対応" FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,4,0,12"/>
-              <TextBlock Text="仮動画モード中は画像なしでOK、音声だけドロップすれば仮画像を生成します"
+              <TextBlock Text="仮動画モード中は横固定の仮画像を使い、音声だけでも複数まとめてドロップできます"
                          FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,0,0,12"
                          Visibility="{Binding UseDraftMode, Converter={StaticResource BoolToVisibility}}"/>
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
