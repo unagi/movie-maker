@@ -244,6 +244,85 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
+    public void DraftMode_DroppingImageReportsThatItIsNotUsed()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var image = temp.CreateFile("cover.png");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true
+        };
+
+        viewModel.HandleDrop(new[] { image });
+
+        Assert.Contains("仮動画", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("画像", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DroppingUnsupportedFileReportsSkippedCount()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var unsupported = temp.CreateFile("notes.txt");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "drop-check"
+        };
+
+        viewModel.HandleDrop(new[] { unsupported });
+
+        Assert.Contains("未対応ファイル1件", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StandardMode_DroppingMultipleImagesDoesNotChooseOneSilently()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var first = temp.CreateFile("first.png");
+        var second = temp.CreateFile("second.jpg");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "drop-check"
+        };
+
+        viewModel.HandleDrop(new[] { first, second });
+
+        Assert.False(viewModel.IsImageReady);
+        Assert.Contains("画像は1件ずつ", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StandardMode_InvalidReplacementKeepsCurrentImage()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var current = temp.CreatePng("current.png");
+        var broken = temp.CreateFile("broken.png");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "drop-check"
+        };
+
+        viewModel.HandleDrop(new[] { current });
+        viewModel.HandleDrop(new[] { broken });
+
+        Assert.Contains("current.png", viewModel.ImageStatusText, StringComparison.Ordinal);
+        Assert.Contains("現在の画像を維持", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DraftMode_DefaultsToHighAudioQuality()
     {
         var viewModel = new MainViewModel
@@ -358,6 +437,14 @@ public class MainViewModelDraftModeTests
         {
             var path = Path.Combine(_root, name);
             File.WriteAllText(path, "test");
+            return path;
+        }
+
+        public string CreatePng(string name)
+        {
+            const string onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+            var path = Path.Combine(_root, name);
+            File.WriteAllBytes(path, Convert.FromBase64String(onePixelPng));
             return path;
         }
 

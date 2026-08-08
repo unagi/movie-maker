@@ -58,6 +58,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private double? _audioDurationSeconds;
     private bool _canEncode;
     private bool _isEncoding;
+    private bool _isFileDragOver;
     private bool _isApplyingAutoTitle;
     private EncodeProfile _selectedProfile = EncodeProfile.Standard;
     private DraftAudioQuality _draftAudioQuality = DraftAudioQuality.High;
@@ -137,6 +138,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
         : "エンコード対象";
 
     public string EffectiveImageCaption => ImageStatusText;
+
+    public bool IsFileDragOver
+    {
+        get => _isFileDragOver;
+        private set
+        {
+            if (_isFileDragOver == value) return;
+            _isFileDragOver = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string DropActionText => SelectedProfile == EncodeProfile.DraftPreview
+        ? "音声を末尾へ追加"
+        : "画像を置き換え・音声を末尾へ追加";
 
     public bool HasNoAudioTracks => AudioTracks.Count == 0;
 
@@ -252,6 +268,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             if (_isEncoding == value) return;
             _isEncoding = value;
             OnPropertyChanged();
+            if (value)
+            {
+                IsFileDragOver = false;
+            }
             RemoveAudioTrackCommand.RaiseCanExecuteChanged();
         }
     }
@@ -299,6 +319,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(EffectiveImagePreview));
             OnPropertyChanged(nameof(EffectiveImageBadgeText));
             OnPropertyChanged(nameof(EffectiveImageCaption));
+            OnPropertyChanged(nameof(DropActionText));
             NotifyStatusChanged();
             UpdateValidation(true);
         }
@@ -570,41 +591,115 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void HandleDrop(string[] files)
     {
+        if (IsEncoding)
+        {
+            StatusMessage = "エンコード中は入力を変更できません";
+            return;
+        }
+
         if (files == null || files.Length == 0)
         {
             return;
         }
 
+        var imageFiles = new List<string>();
         var audioFiles = new List<string>();
+        var unsupportedCount = 0;
         foreach (var file in files)
         {
             if (!File.Exists(file))
             {
+                unsupportedCount++;
                 continue;
             }
 
             var ext = Path.GetExtension(file);
-            if (SelectedProfile != EncodeProfile.DraftPreview && ImageExtensions.Contains(ext))
+            if (ImageExtensions.Contains(ext))
             {
-                SetImage(file);
+                imageFiles.Add(file);
             }
             else if (AudioExtensions.Contains(ext))
             {
                 audioFiles.Add(file);
             }
+            else
+            {
+                unsupportedCount++;
+            }
+        }
+
+        var imageReplaced = false;
+        var imageLoadFailed = false;
+        var multipleImagesRejected = false;
+        var draftImagesIgnored = 0;
+        if (SelectedProfile == EncodeProfile.DraftPreview)
+        {
+            draftImagesIgnored = imageFiles.Count;
+        }
+        else if (imageFiles.Count == 1)
+        {
+            imageReplaced = TrySetImage(imageFiles[0]);
+            imageLoadFailed = !imageReplaced;
+        }
+        else if (imageFiles.Count > 1)
+        {
+            multipleImagesRejected = true;
         }
 
         var (addedCount, duplicateCount) = AddAudioFiles(audioFiles);
         UpdateValidation(true);
-        if (addedCount > 0 || duplicateCount > 0)
+
+        var messages = new List<string>();
+        if (imageReplaced)
         {
-            StatusMessage = duplicateCount > 0
-                ? $"音声{addedCount}件を追加、重複{duplicateCount}件をスキップしました"
-                : $"音声{addedCount}件を追加しました（合計{AudioTracks.Count}件）";
+            messages.Add($"画像を{Path.GetFileName(imageFiles[0])}に置き換えました");
+        }
+        else if (imageLoadFailed)
+        {
+            messages.Add($"画像を読み込めなかったため現在の画像を維持しました: {Path.GetFileName(imageFiles[0])}");
+        }
+        else if (multipleImagesRejected)
+        {
+            messages.Add("画像は1件ずつドロップしてください");
+        }
+
+        if (draftImagesIgnored > 0)
+        {
+            messages.Add($"仮動画では画像{draftImagesIgnored}件を使用しません");
+        }
+
+        if (addedCount > 0)
+        {
+            messages.Add($"音声{addedCount}件を末尾へ追加しました（合計{AudioTracks.Count}件）");
+        }
+
+        if (duplicateCount > 0)
+        {
+            messages.Add($"重複音声{duplicateCount}件をスキップしました");
+        }
+
+        if (unsupportedCount > 0)
+        {
+            messages.Add($"未対応ファイル{unsupportedCount}件をスキップしました");
+        }
+
+        if (messages.Count > 0)
+        {
+            StatusMessage = string.Join(" / ", messages);
         }
     }
 
-    private void SetImage(string path)
+    public void SetFileDragOver(bool isFileDragOver)
+    {
+        if (IsEncoding && isFileDragOver)
+        {
+            return;
+        }
+
+        IsFileDragOver = isFileDragOver;
+    }
+
+    private bool TrySetImage(string path)
     {
         try
         {
@@ -624,19 +719,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             UpdateAspectInfo();
             NotifyStatusChanged();
+            return true;
         }
         catch
         {
-            _imagePath = null;
-            ImagePreview = null;
-            _imageWidth = 0;
-            _imageHeight = 0;
-            _orientation = null;
-            _aspectValid = false;
-            ImageFileLabel = "画像: 読み込み失敗";
-            OrientationLabel = "向き: 未判定";
-            AspectLabel = "比率: 未判定";
-            NotifyStatusChanged();
+            return false;
         }
     }
 
