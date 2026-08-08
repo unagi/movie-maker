@@ -17,8 +17,20 @@ public static class PlaceholderImageService
     {
         Directory.CreateDirectory(directory);
 
-        var options = EncodingOptionsResolver.Resolve(orientation, EncodeProfile.DraftPreview);
         var outputPath = Path.Combine(directory, $"_draft_placeholder_{timestamp:yyyyMMdd_HHmmss}.png");
+        var bitmap = CreateDraftPlaceholderBitmap(title, orientation);
+
+        var encoder = new Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(Imaging.BitmapFrame.Create(bitmap));
+
+        using var stream = File.Create(outputPath);
+        encoder.Save(stream);
+        return outputPath;
+    }
+
+    public static Imaging.BitmapSource CreateDraftPlaceholderBitmap(string title, VideoOrientation orientation)
+    {
+        var options = EncodingOptionsResolver.Resolve(orientation, EncodeProfile.DraftPreview);
 
         var visual = new Media.DrawingVisual();
         using (var dc = visual.RenderOpen())
@@ -51,13 +63,8 @@ public static class PlaceholderImageService
 
         var bitmap = new Imaging.RenderTargetBitmap(options.Width, options.Height, 96, 96, Media.PixelFormats.Pbgra32);
         bitmap.Render(visual);
-
-        var encoder = new Imaging.PngBitmapEncoder();
-        encoder.Frames.Add(Imaging.BitmapFrame.Create(bitmap));
-
-        using var stream = File.Create(outputPath);
-        encoder.Save(stream);
-        return outputPath;
+        bitmap.Freeze();
+        return bitmap;
     }
 
     private static Media.FormattedText CreateText(

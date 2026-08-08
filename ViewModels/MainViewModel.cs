@@ -44,6 +44,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _title = string.Empty;
     private string? _imagePath;
     private BitmapImage? _imagePreview;
+    private BitmapSource? _draftImagePreview;
     private string _imageFileLabel = "画像: 未設定";
     private string _audioFileLabel = "音楽: 未設定";
     private string _orientationLabel = "向き: 未判定";
@@ -100,6 +101,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 _autoFilledTitle = null;
             }
             OnPropertyChanged();
+            RefreshDraftImagePreview();
             UpdateValidation(true);
         }
     }
@@ -112,6 +114,44 @@ public sealed class MainViewModel : INotifyPropertyChanged
             if (_imagePreview == value) return;
             _imagePreview = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(EffectiveImagePreview));
+        }
+    }
+
+    public BitmapSource? EffectiveImagePreview
+    {
+        get
+        {
+            if (SelectedProfile != EncodeProfile.DraftPreview)
+            {
+                return ImagePreview;
+            }
+
+            _draftImagePreview ??= PlaceholderImageService.CreateDraftPlaceholderBitmap(Title, VideoOrientation.Horizontal);
+            return _draftImagePreview;
+        }
+    }
+
+    public string EffectiveImageBadgeText => SelectedProfile == EncodeProfile.DraftPreview
+        ? "仮画像（自動生成）"
+        : "エンコード対象";
+
+    public string EffectiveImageCaption => ImageStatusText;
+
+    public bool HasNoAudioTracks => AudioTracks.Count == 0;
+
+    public string AudioQueueSummaryText
+    {
+        get
+        {
+            if (AudioTracks.Count == 0)
+            {
+                return "0ファイル";
+            }
+
+            return _audioDurationSeconds.HasValue
+                ? $"{AudioTracks.Count}ファイル / 合計 {FormatDuration(_audioDurationSeconds.Value)}"
+                : $"{AudioTracks.Count}ファイル";
         }
     }
 
@@ -212,6 +252,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             if (_isEncoding == value) return;
             _isEncoding = value;
             OnPropertyChanged();
+            RemoveAudioTrackCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -255,6 +296,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(IsDraftOrientationVertical));
             OnPropertyChanged(nameof(IsDraftAudioQualityHigh));
             OnPropertyChanged(nameof(IsDraftAudioQualityLow));
+            OnPropertyChanged(nameof(EffectiveImagePreview));
+            OnPropertyChanged(nameof(EffectiveImageBadgeText));
+            OnPropertyChanged(nameof(EffectiveImageCaption));
             NotifyStatusChanged();
             UpdateValidation(true);
         }
@@ -617,6 +661,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _ = UpdateAudioTrackInfoAsync(track);
         }
 
+        UpdateAudioTrackPositions();
         UpdateAudioFileLabel();
         NotifyStatusChanged();
         return (addedCount, duplicateCount);
@@ -630,6 +675,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         RecalculateAudioDuration();
+        UpdateAudioTrackPositions();
         UpdateAudioFileLabel();
         NotifyStatusChanged();
         UpdateValidation(true);
@@ -645,6 +691,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         AudioTracks.Move(oldIndex, newIndex);
+        UpdateAudioTrackPositions();
         NotifyStatusChanged();
         StatusMessage = $"音声トラックを{oldIndex + 1}番目から{newIndex + 1}番目へ移動しました";
     }
@@ -657,6 +704,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             1 => $"音楽: {AudioTracks[0].FileName}",
             _ => $"音楽: {AudioTracks.Count}ファイル"
         };
+    }
+
+    private void UpdateAudioTrackPositions()
+    {
+        for (var index = 0; index < AudioTracks.Count; index++)
+        {
+            AudioTracks[index].UpdatePosition(index + 1);
+        }
     }
 
     private void ClearInputs()
@@ -817,10 +872,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(ShowReplaceImageHint));
         OnPropertyChanged(nameof(IsAudioReady));
         OnPropertyChanged(nameof(AudioStatusText));
+        OnPropertyChanged(nameof(AudioQueueSummaryText));
+        OnPropertyChanged(nameof(HasNoAudioTracks));
         OnPropertyChanged(nameof(IsOutputReady));
         OnPropertyChanged(nameof(OutputStatusText));
         OnPropertyChanged(nameof(EncodingSettingsText));
         OnPropertyChanged(nameof(CanClearInputs));
+        OnPropertyChanged(nameof(EffectiveImagePreview));
+        OnPropertyChanged(nameof(EffectiveImageBadgeText));
+        OnPropertyChanged(nameof(EffectiveImageCaption));
+    }
+
+    private void RefreshDraftImagePreview()
+    {
+        if (_draftImagePreview == null && SelectedProfile != EncodeProfile.DraftPreview)
+        {
+            return;
+        }
+
+        _draftImagePreview = PlaceholderImageService.CreateDraftPlaceholderBitmap(Title, VideoOrientation.Horizontal);
+        OnPropertyChanged(nameof(EffectiveImagePreview));
+        OnPropertyChanged(nameof(EffectiveImageCaption));
     }
 
     private string GetTargetResolutionText()
@@ -898,7 +970,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        track.ApplyAnalysis(info == null ? "情報取得不可" : FormatAudioInfo(info), info?.DurationSeconds);
+        var infoText = info switch
+        {
+            null => "情報取得不可",
+            { DurationSeconds: not null } => $"{FormatAudioInfo(info)} / {FormatDuration(info.DurationSeconds.Value)}",
+            _ => FormatAudioInfo(info)
+        };
+        track.ApplyAnalysis(infoText, info?.DurationSeconds);
         RecalculateAudioDuration();
         NotifyStatusChanged();
     }

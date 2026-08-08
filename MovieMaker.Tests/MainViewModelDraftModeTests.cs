@@ -83,6 +83,20 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
+    public void DraftMode_ExposesGeneratedPlaceholderAsEffectiveImage()
+    {
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-preview",
+            UseDraftMode = true
+        };
+
+        Assert.NotNull(viewModel.EffectiveImagePreview);
+        Assert.Equal("仮画像（自動生成）", viewModel.EffectiveImageBadgeText);
+        Assert.Contains("960x540", viewModel.EffectiveImageCaption, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CopyrightCheckProductionMode_UsesUpdatedLabel()
     {
         var viewModel = new MainViewModel
@@ -134,6 +148,8 @@ public class MainViewModelDraftModeTests
         viewModel.HandleDrop(new[] { second });
 
         Assert.Equal(new[] { first, second }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.Equal(new[] { 1, 2 }, viewModel.AudioTracks.Select(track => track.Position));
+        Assert.Contains("2ファイル", viewModel.AudioQueueSummaryText, StringComparison.Ordinal);
         Assert.Contains("追加", viewModel.StatusMessage, StringComparison.Ordinal);
     }
 

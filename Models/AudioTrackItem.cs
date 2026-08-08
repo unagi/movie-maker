@@ -7,6 +7,7 @@ public sealed class AudioTrackItem : INotifyPropertyChanged
 {
     private string _infoText = "解析中...";
     private double? _durationSeconds;
+    private int _position;
     private bool _isDropTargetBefore;
     private bool _isDropTargetAfter;
 
@@ -18,6 +19,17 @@ public sealed class AudioTrackItem : INotifyPropertyChanged
 
     public string Path { get; }
     public string FileName { get; }
+
+    public int Position
+    {
+        get => _position;
+        private set
+        {
+            if (_position == value) return;
+            _position = value;
+            OnPropertyChanged();
+        }
+    }
 
     public string InfoText
     {
@@ -67,6 +79,11 @@ public sealed class AudioTrackItem : INotifyPropertyChanged
     {
         InfoText = infoText;
         DurationSeconds = durationSeconds;
+    }
+
+    public void UpdatePosition(int position)
+    {
+        Position = position;
     }
 
     public void ClearDropIndicator()

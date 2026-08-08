@@ -19,6 +19,7 @@
   <Window.Resources>
     <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
     <conv:NullToVisibilityConverter x:Key="NullToVisibility"/>
+    <conv:NullToVisibilityConverter x:Key="NotNullToVisibility" Inverse="True"/>
     <conv:StringNullOrEmptyToVisibilityConverter x:Key="StringEmptyToVisibility"/>
     <conv:StringNullOrEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibility" Inverse="True"/>
     <conv:BoolToTextConverter x:Key="BadgeDefaultText" TrueText="OK" FalseText="未設定"/>
@@ -321,37 +322,121 @@
         <Border Grid.Row="4" Style="{StaticResource CardStyle}" Padding="0"
                 AllowDrop="True" Drop="DropArea_OnDrop" DragEnter="DropArea_OnDragEnter">
           <Grid Background="#F9FAFB">
-            <Rectangle Margin="12" RadiusX="8" RadiusY="8" Stroke="#CBD5E1" StrokeThickness="1"
-                       StrokeDashArray="4 4" Fill="#F9FAFB"
-                       Visibility="{Binding ImagePreview, Converter={StaticResource NullToVisibility}}"/>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="*"/>
+              <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-            <Image Source="{Binding ImagePreview}" Stretch="Uniform" Margin="12"/>
+            <Grid Grid.Row="0" MinHeight="260">
+              <Rectangle Margin="12" RadiusX="8" RadiusY="8" Stroke="#CBD5E1" StrokeThickness="1"
+                         StrokeDashArray="4 4" Fill="#F9FAFB"
+                         Visibility="{Binding EffectiveImagePreview, Converter={StaticResource NullToVisibility}}"/>
 
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24"
-                        Visibility="{Binding ImagePreview, Converter={StaticResource NullToVisibility}}">
-              <Border Width="56" Height="56" CornerRadius="28" Background="#E5E7EB" Margin="0,0,0,12">
-                <TextBlock Text="&#xE898;" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="#6B7280"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
-              </Border>
-              <TextBlock Text="ここにファイルをドロップ" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center"/>
-              <TextBlock Text="画像ファイルと音楽ファイルに対応" FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,4,0,12"/>
-              <TextBlock Text="仮動画モード中は横固定の仮画像を使い、音声だけでも複数まとめてドロップできます"
-                         FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,0,0,12"
-                         Visibility="{Binding UseDraftMode, Converter={StaticResource BoolToVisibility}}"/>
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                <Border Background="#EEF2FF" CornerRadius="16" Padding="10,4" Margin="0,0,8,0">
-                  <TextBlock Text="JPG, PNG, WebP" FontSize="11" Foreground="#3B82F6"/>
+              <Image Source="{Binding EffectiveImagePreview}" Stretch="Uniform" Margin="12"/>
+
+              <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24"
+                          Visibility="{Binding EffectiveImagePreview, Converter={StaticResource NullToVisibility}}">
+                <Border Width="56" Height="56" CornerRadius="28" Background="#E5E7EB" Margin="0,0,0,12">
+                  <TextBlock Text="&#xE898;" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="#6B7280"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                <Border Background="#EEF2FF" CornerRadius="16" Padding="10,4">
-                  <TextBlock Text="MP3, WAV, AAC" FontSize="11" Foreground="#3B82F6"/>
-                </Border>
+                <TextBlock Text="画像または音声をドロップ" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center"/>
+                <TextBlock Text="画像は置き換え、音声は末尾へ追加します" FontSize="12" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,4,0,12"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                  <Border Background="#EEF2FF" CornerRadius="16" Padding="10,4" Margin="0,0,8,0">
+                    <TextBlock Text="JPG, PNG, WebP" FontSize="11" Foreground="#3B82F6"/>
+                  </Border>
+                  <Border Background="#EEF2FF" CornerRadius="16" Padding="10,4">
+                    <TextBlock Text="MP3, WAV, AAC, M4A, FLAC" FontSize="11" Foreground="#3B82F6"/>
+                  </Border>
+                </StackPanel>
               </StackPanel>
-            </StackPanel>
 
-            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
-                    Background="#EEF2FF" CornerRadius="12" Padding="10,4"
-                    Visibility="{Binding ShowReplaceImageHint, Converter={StaticResource BoolToVisibility}}">
-              <TextBlock Text="ドラッグ＆ドロップで差し替え" FontSize="11" Foreground="#3B82F6"/>
+              <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="20"
+                      Background="#E6111827" CornerRadius="8" Padding="10,6"
+                      Visibility="{Binding EffectiveImagePreview, Converter={StaticResource NotNullToVisibility}}">
+                <StackPanel>
+                  <TextBlock Text="{Binding EffectiveImageBadgeText}" Foreground="White" FontSize="11" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding EffectiveImageCaption}" Foreground="#D1D5DB" FontSize="11" MaxWidth="480" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+              </Border>
+
+              <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
+                      Background="#EEF2FF" CornerRadius="12" Padding="10,4"
+                      Visibility="{Binding ShowReplaceImageHint, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="画像をドロップして差し替え" FontSize="11" Foreground="#3B82F6"/>
+              </Border>
+            </Grid>
+
+            <Border Grid.Row="1" Background="White" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,1,0,0" Padding="12">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="音声トラック" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="1" Text="{Binding AudioQueueSummaryText}" Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+                </Grid>
+
+                <TextBlock Grid.Row="1" Text="音声ファイルをドロップすると末尾へ追加されます"
+                           Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,10,0,4">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="Visibility" Value="Visible"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsAudioReady}" Value="True">
+                          <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
+
+                <ListBox Grid.Row="1" ItemsSource="{Binding AudioTracks}" MaxHeight="180" Margin="0,8,0,0"
+                         BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         Visibility="{Binding IsAudioReady, Converter={StaticResource BoolToVisibility}}">
+                  <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                      <Setter Property="Padding" Value="0"/>
+                      <Setter Property="Margin" Value="0,0,0,6"/>
+                    </Style>
+                  </ListBox.ItemContainerStyle>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Background="#F9FAFB" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="8">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="32"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <Border Width="24" Height="24" CornerRadius="12" Background="#EEF2FF" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Position}" Foreground="#3B82F6" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold"/>
+                          </Border>
+                          <StackPanel Grid.Column="1" Margin="6,0,8,0">
+                            <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/>
+                            <TextBlock Text="{Binding InfoText}" Foreground="{StaticResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                          </StackPanel>
+                          <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="&#xE711;" ToolTip="この音声を削除"
+                                  Command="{Binding DataContext.RemoveAudioTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  CommandParameter="{Binding}"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+
+                <TextBlock Grid.Row="2" Text="表示順に連結します" Foreground="{StaticResource TextSecondary}" FontSize="11"
+                           Margin="0,4,0,0" Visibility="{Binding IsAudioReady, Converter={StaticResource BoolToVisibility}}"/>
+              </Grid>
             </Border>
           </Grid>
         </Border>
