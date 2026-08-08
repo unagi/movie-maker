@@ -28,6 +28,7 @@ public sealed record EncodeResult(
     string Encoder);
 
 public sealed record AudioInfo(
+    string? CodecName,
     int? SampleRate,
     int? BitDepth,
     int? Channels,
@@ -292,7 +293,7 @@ public static class EncodingService
         {
             "-v", "error",
             "-select_streams", "a:0",
-            "-show_entries", "stream=sample_rate,bits_per_sample,bits_per_raw_sample,channels,bit_rate,sample_fmt:format=duration",
+            "-show_entries", "stream=codec_name,sample_rate,bits_per_sample,bits_per_raw_sample,channels,bit_rate,sample_fmt:format=duration",
             "-of", "json",
             audioPath
         });
@@ -311,6 +312,7 @@ public static class EncodingService
             }
 
             var stream = streams[0];
+            var codecName = ParseStringProperty(stream, "codec_name");
             var sampleRate = ParseIntProperty(stream, "sample_rate");
             var bitDepth = ParseIntProperty(stream, "bits_per_sample")
                            ?? ParseIntProperty(stream, "bits_per_raw_sample");
@@ -324,13 +326,13 @@ public static class EncodingService
                 bitDepth = ParseBitDepthFromSampleFormat(sampleFormat);
             }
 
-            if (sampleRate == null && channels == null && bitDepth == null && bitRate == null &&
+            if (codecName == null && sampleRate == null && channels == null && bitDepth == null && bitRate == null &&
                 sampleFormat == null && durationSeconds == null)
             {
                 return null;
             }
 
-            return new AudioInfo(sampleRate, bitDepth, channels, bitRate, sampleFormat, durationSeconds);
+            return new AudioInfo(codecName, sampleRate, bitDepth, channels, bitRate, sampleFormat, durationSeconds);
         }
         catch
         {

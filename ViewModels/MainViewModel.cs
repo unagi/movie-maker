@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -42,7 +43,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private string _title = string.Empty;
     private string? _imagePath;
-    private readonly List<string> _audioPaths = [];
     private BitmapImage? _imagePreview;
     private string _imageFileLabel = "画像: 未設定";
     private string _audioFileLabel = "音楽: 未設定";
@@ -53,7 +53,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _outputDirectoryPath = string.Empty;
     private string _archiveDirectoryPath = string.Empty;
     private string _statusMessage = "準備してください";
-    private string _audioInfoText = string.Empty;
     private string? _autoFilledTitle;
     private double? _audioDurationSeconds;
     private bool _canEncode;
@@ -74,6 +73,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OpenOutputFolderCommand = new RelayCommand(_ => OpenFolder(OutputDirectoryPath), _ => Directory.Exists(OutputDirectoryPath));
         OpenArchiveFolderCommand = new RelayCommand(_ => OpenFolder(ArchiveDirectoryPath), _ => Directory.Exists(ArchiveDirectoryPath));
         ClearInputsCommand = new RelayCommand(_ => ClearInputs(), _ => CanClearInputs);
+        RemoveAudioTrackCommand = new RelayCommand(RemoveAudioTrack, track => !IsEncoding && track is AudioTrackItem);
         EncodeCommand = new AsyncRelayCommand(EncodeAsync, () => CanEncode);
 
         UpdateSettingsLabels();
@@ -84,7 +84,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand OpenOutputFolderCommand { get; }
     public RelayCommand OpenArchiveFolderCommand { get; }
     public RelayCommand ClearInputsCommand { get; }
+    public RelayCommand RemoveAudioTrackCommand { get; }
     public AsyncRelayCommand EncodeCommand { get; }
+    public ObservableCollection<AudioTrackItem> AudioTracks { get; } = [];
 
     public string Title
     {
@@ -235,7 +237,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool CanClearInputs => !IsEncoding && (IsImageReady || IsAudioReady);
+    public bool CanClearInputs => !IsEncoding && (!string.IsNullOrWhiteSpace(_imagePath) || IsAudioReady);
 
     public EncodeProfile SelectedProfile
     {
@@ -420,7 +422,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool IsAudioReady => _audioPaths.Count > 0;
+    public bool IsAudioReady => AudioTracks.Count > 0;
     public string AudioStatusText
     {
         get
@@ -430,20 +432,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return "未設定";
             }
 
-            if (_audioPaths.Count > 1)
+            if (AudioTracks.Count > 1)
             {
-                return string.IsNullOrWhiteSpace(_audioInfoText)
-                    ? $"{_audioPaths.Count}ファイル"
-                    : $"{_audioPaths.Count}ファイル ({_audioInfoText})";
+                return _audioDurationSeconds.HasValue
+                    ? $"{AudioTracks.Count}ファイル ({FormatDuration(_audioDurationSeconds.Value)})"
+                    : $"{AudioTracks.Count}ファイル";
             }
 
-            var name = Path.GetFileName(_audioPaths[0]);
-            if (string.IsNullOrWhiteSpace(_audioInfoText))
-            {
-                return name;
-            }
-
-            return $"{name} ({_audioInfoText})";
+            var track = AudioTracks[0];
+            return string.IsNullOrWhiteSpace(track.InfoText)
+                ? track.FileName
+                : $"{track.FileName} ({track.InfoText})";
         }
     }
 
@@ -495,7 +494,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 string.Empty,
                 "音声",
                 "・コーデック: AAC",
-                $"・入力: {(_audioPaths.Count > 1 ? $"{_audioPaths.Count}ファイルをファイル名順で連結" : "単一ファイル")}",
+                $"・入力: {(AudioTracks.Count > 1 ? $"{AudioTracks.Count}ファイルを表示順で連結" : "単一ファイル")}",
                 $"・ビットレート: {options.AudioBitrate}",
                 $"・サンプリング周波数: {int.Parse(options.AudioSampleRate) / 1000.0:0.#} kHz",
                 string.Empty,
@@ -551,19 +550,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
         }
 
-        if (audioFiles.Count > 0)
-        {
-            if (SelectedProfile == EncodeProfile.DraftPreview)
-            {
-                SetAudioFiles(audioFiles);
-            }
-            else
-            {
-                SetAudio(audioFiles[^1]);
-            }
-        }
-
+        var (addedCount, duplicateCount) = AddAudioFiles(audioFiles);
         UpdateValidation(true);
+        if (addedCount > 0 || duplicateCount > 0)
+        {
+            StatusMessage = duplicateCount > 0
+                ? $"音声{addedCount}件を追加、重複{duplicateCount}件をスキップしました"
+                : $"音声{addedCount}件を追加しました（合計{AudioTracks.Count}件）";
+        }
     }
 
     private void SetImage(string path)
@@ -602,33 +596,73 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private void SetAudio(string path)
+    private (int AddedCount, int DuplicateCount) AddAudioFiles(IEnumerable<string> paths)
     {
-        SetAudioFiles([path]);
+        var existingPaths = new HashSet<string>(AudioTracks.Select(track => track.Path), StringComparer.OrdinalIgnoreCase);
+        var addedCount = 0;
+        var duplicateCount = 0;
+        _audioDurationSeconds = null;
+
+        foreach (var path in paths.Where(File.Exists))
+        {
+            if (!existingPaths.Add(path))
+            {
+                duplicateCount++;
+                continue;
+            }
+
+            var track = new AudioTrackItem(path);
+            AudioTracks.Add(track);
+            addedCount++;
+            _ = UpdateAudioTrackInfoAsync(track);
+        }
+
+        UpdateAudioFileLabel();
+        NotifyStatusChanged();
+        return (addedCount, duplicateCount);
     }
 
-    private void SetAudioFiles(IEnumerable<string> paths)
+    private void RemoveAudioTrack(object? parameter)
     {
-        _audioPaths.Clear();
-        _audioPaths.AddRange(paths
-            .Where(File.Exists)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase));
-        _audioInfoText = "解析中...";
-        _audioDurationSeconds = null;
-        AudioFileLabel = _audioPaths.Count <= 1
-            ? $"音楽: {Path.GetFileName(_audioPaths[0])}"
-            : $"音楽: {_audioPaths.Count}ファイル";
+        if (parameter is not AudioTrackItem track || !AudioTracks.Remove(track))
+        {
+            return;
+        }
+
+        RecalculateAudioDuration();
+        UpdateAudioFileLabel();
         NotifyStatusChanged();
-        _ = UpdateAudioInfoAsync(_audioPaths.ToArray());
+        UpdateValidation(true);
+        StatusMessage = $"音声を削除しました: {track.FileName}";
+    }
+
+    public void MoveAudioTrack(int oldIndex, int newIndex)
+    {
+        if (IsEncoding || oldIndex < 0 || oldIndex >= AudioTracks.Count ||
+            newIndex < 0 || newIndex >= AudioTracks.Count || oldIndex == newIndex)
+        {
+            return;
+        }
+
+        AudioTracks.Move(oldIndex, newIndex);
+        NotifyStatusChanged();
+        StatusMessage = $"音声トラックを{oldIndex + 1}番目から{newIndex + 1}番目へ移動しました";
+    }
+
+    private void UpdateAudioFileLabel()
+    {
+        AudioFileLabel = AudioTracks.Count switch
+        {
+            0 => "音楽: 未設定",
+            1 => $"音楽: {AudioTracks[0].FileName}",
+            _ => $"音楽: {AudioTracks.Count}ファイル"
+        };
     }
 
     private void ClearInputs()
     {
         _imagePath = null;
-        _audioPaths.Clear();
-        _audioInfoText = string.Empty;
+        AudioTracks.Clear();
         _audioDurationSeconds = null;
         _imageWidth = 0;
         _imageHeight = 0;
@@ -745,7 +779,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             errors.Add("画像の比率が9:16または16:9ではありません");
         }
 
-        if (_audioPaths.Count == 0)
+        if (AudioTracks.Count == 0)
         {
             errors.Add("音楽が未設定です");
         }
@@ -855,90 +889,39 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return "・Shorts制限: 短縮なし（0:57未満、または1:00超2:57未満）";
     }
 
-    private async Task UpdateAudioInfoAsync(IReadOnlyList<string> paths)
+    private async Task UpdateAudioTrackInfoAsync(AudioTrackItem track)
     {
         var ffmpegPath = EncodingService.ResolveFfmpegPath();
-        var infos = new List<AudioInfo?>();
-        foreach (var path in paths)
-        {
-            infos.Add(await EncodingService.GetAudioInfoAsync(path, ffmpegPath));
-        }
-
-        if (!AreSameAudioPaths(paths))
+        var info = await EncodingService.GetAudioInfoAsync(track.Path, ffmpegPath);
+        if (!AudioTracks.Contains(track))
         {
             return;
         }
 
-        if (paths.Count == 1)
-        {
-            var info = infos[0];
-            if (info == null)
-            {
-                _audioInfoText = "情報取得不可";
-                _audioDurationSeconds = null;
-            }
-            else
-            {
-                _audioInfoText = FormatAudioInfo(info);
-                _audioDurationSeconds = info.DurationSeconds;
-            }
-        }
-        else
-        {
-            _audioInfoText = FormatCombinedAudioInfo(infos);
-            _audioDurationSeconds = GetCombinedDurationSeconds(infos);
-        }
+        track.ApplyAnalysis(info == null ? "情報取得不可" : FormatAudioInfo(info), info?.DurationSeconds);
+        RecalculateAudioDuration();
         NotifyStatusChanged();
     }
 
-    private bool AreSameAudioPaths(IReadOnlyList<string> paths)
+    private void RecalculateAudioDuration()
     {
-        if (_audioPaths.Count != paths.Count)
+        if (AudioTracks.Count == 0 || AudioTracks.Any(track => !track.DurationSeconds.HasValue))
         {
-            return false;
+            _audioDurationSeconds = null;
+            return;
         }
 
-        for (var i = 0; i < paths.Count; i++)
-        {
-            if (!string.Equals(_audioPaths[i], paths[i], StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static string FormatCombinedAudioInfo(IReadOnlyList<AudioInfo?> infos)
-    {
-        var totalDuration = GetCombinedDurationSeconds(infos);
-        if (totalDuration.HasValue)
-        {
-            return $"合計 {FormatDuration(totalDuration.Value)}";
-        }
-
-        return infos.Any(info => info != null) ? "一部情報取得不可" : "情報取得不可";
-    }
-
-    private static double? GetCombinedDurationSeconds(IReadOnlyList<AudioInfo?> infos)
-    {
-        double total = 0;
-        foreach (var info in infos)
-        {
-            if (info?.DurationSeconds == null)
-            {
-                return null;
-            }
-
-            total += info.DurationSeconds.Value;
-        }
-
-        return total;
+        _audioDurationSeconds = AudioTracks.Sum(track => track.DurationSeconds!.Value);
     }
 
     private static string FormatAudioInfo(AudioInfo info)
     {
         var parts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(info.CodecName))
+        {
+            parts.Add(info.CodecName.ToUpperInvariant());
+        }
 
         if (info.SampleRate.HasValue)
         {
@@ -1120,7 +1103,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         var orientation = GetEffectiveOrientation();
-        if (orientation == null || _audioPaths.Count == 0)
+        if (orientation == null || AudioTracks.Count == 0)
         {
             StatusMessage = "入力が不足しています";
             return;
@@ -1169,7 +1152,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            foreach (var audioPath in _audioPaths)
+            foreach (var audioPath in AudioTracks.Select(track => track.Path))
             {
                 File.Copy(audioPath, Path.Combine(archiveFolder, Path.GetFileName(audioPath)), overwrite: false);
             }
@@ -1181,7 +1164,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var request = new EncodeRequest(
                 ffmpegPath,
                 imagePath,
-                _audioPaths.ToArray(),
+                AudioTracks.Select(track => track.Path).ToArray(),
                 outputPath,
                 orientation.Value,
                 GetSelectedProfile(),

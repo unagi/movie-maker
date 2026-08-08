@@ -94,7 +94,7 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
-    public void DraftMode_AcceptsMultipleAudioFilesInFileNameOrder()
+    public void DraftMode_AcceptsMultipleAudioFilesInDropOrder()
     {
         using var temp = new TestWorkspace();
         temp.PrepareSettings();
@@ -110,11 +110,121 @@ public class MainViewModelDraftModeTests
 
         viewModel.HandleDrop(new[] { later, earlier });
 
-        var audioPaths = GetPrivateField<List<string>>(viewModel, "_audioPaths");
-
-        Assert.Equal(new[] { earlier, later }, audioPaths);
+        Assert.Equal(new[] { later, earlier }, viewModel.AudioTracks.Select(track => track.Path));
         Assert.Equal("音楽: 2ファイル", viewModel.AudioFileLabel);
         Assert.Contains("2ファイル", viewModel.AudioStatusText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DraftMode_SequentialDropsAppendAudioTracks()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var first = temp.CreateFile("first.mp3");
+        var second = temp.CreateFile("second.m4a");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true
+        };
+
+        viewModel.HandleDrop(new[] { first });
+        viewModel.HandleDrop(new[] { second });
+
+        Assert.Equal(new[] { first, second }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.Contains("追加", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DraftMode_RedroppingAudioSkipsDuplicateWithoutChangingOrder()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var first = temp.CreateFile("first.mp3");
+        var second = temp.CreateFile("second.wav");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true
+        };
+
+        viewModel.HandleDrop(new[] { first, second });
+        viewModel.HandleDrop(new[] { first });
+
+        Assert.Equal(new[] { first, second }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.Contains("重複", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DraftMode_MoveAndRemoveAudioTracksUpdatesQueue()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var first = temp.CreateFile("first.mp3");
+        var second = temp.CreateFile("second.wav");
+        var third = temp.CreateFile("third.m4a");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true
+        };
+
+        viewModel.HandleDrop(new[] { first, second, third });
+        viewModel.MoveAudioTrack(2, 0);
+        viewModel.RemoveAudioTrackCommand.Execute(viewModel.AudioTracks[1]);
+
+        Assert.Equal(new[] { third, second }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.Equal("音楽: 2ファイル", viewModel.AudioFileLabel);
+    }
+
+    [Fact]
+    public void StandardMode_SequentialAudioDropsAlsoAppendTracks()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var first = temp.CreateFile("first.mp3");
+        var second = temp.CreateFile("second.m4a");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "standard-check"
+        };
+
+        viewModel.HandleDrop(new[] { first });
+        viewModel.HandleDrop(new[] { second });
+
+        Assert.Equal(new[] { first, second }, viewModel.AudioTracks.Select(track => track.Path));
+    }
+
+    [Fact]
+    public void DraftMode_ClearCommandReflectsActualInputs()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var audio = temp.CreateFile("sample.mp3");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true
+        };
+
+        Assert.False(viewModel.ClearInputsCommand.CanExecute(null));
+
+        viewModel.HandleDrop(new[] { audio });
+        Assert.True(viewModel.ClearInputsCommand.CanExecute(null));
+
+        viewModel.ClearInputsCommand.Execute(null);
+        Assert.Empty(viewModel.AudioTracks);
+        Assert.False(viewModel.ClearInputsCommand.CanExecute(null));
     }
 
     [Fact]
