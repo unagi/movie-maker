@@ -130,6 +130,36 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
+    public void DraftMode_DroppingFolderAddsAllSupportedAudioFiles()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var folder = Path.Combine(temp.RootPath, "album");
+        var nestedFolder = Path.Combine(folder, "disc-2");
+        Directory.CreateDirectory(nestedFolder);
+        var first = Path.Combine(folder, "01-first.mp3");
+        var second = Path.Combine(folder, "02-second.wav");
+        var third = Path.Combine(nestedFolder, "03-third.m4a");
+        File.WriteAllText(first, "test");
+        File.WriteAllText(second, "test");
+        File.WriteAllText(third, "test");
+        File.WriteAllText(Path.Combine(folder, "notes.txt"), "test");
+
+        var viewModel = new MainViewModel
+        {
+            Title = "folder-drop",
+            UseDraftMode = true
+        };
+
+        viewModel.HandleDrop(new[] { folder });
+
+        Assert.Equal(new[] { first, second, third }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.Contains("音声3件を末尾へ追加", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("未対応ファイル1件", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DraftMode_SequentialDropsAppendAudioTracks()
     {
         using var temp = new TestWorkspace();

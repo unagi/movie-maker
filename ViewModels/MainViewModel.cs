@@ -605,14 +605,49 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var imageFiles = new List<string>();
         var audioFiles = new List<string>();
         var unsupportedCount = 0;
-        foreach (var file in files)
+        var droppedFiles = new List<string>();
+        foreach (var path in files)
         {
-            if (!File.Exists(file))
+            if (File.Exists(path))
             {
-                unsupportedCount++;
+                droppedFiles.Add(path);
                 continue;
             }
 
+            if (Directory.Exists(path))
+            {
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+                                 .OrderBy(file => file, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (AudioExtensions.Contains(Path.GetExtension(file)))
+                        {
+                            audioFiles.Add(file);
+                        }
+                        else
+                        {
+                            unsupportedCount++;
+                        }
+                    }
+                }
+                catch (IOException)
+                {
+                    unsupportedCount++;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    unsupportedCount++;
+                }
+
+                continue;
+            }
+
+            unsupportedCount++;
+        }
+
+        foreach (var file in droppedFiles)
+        {
             var ext = Path.GetExtension(file);
             if (ImageExtensions.Contains(ext))
             {
