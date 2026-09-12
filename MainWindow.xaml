@@ -459,6 +459,34 @@
                           <StackPanel Grid.Column="2" Margin="6,0,8,0">
                             <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/>
                             <TextBlock Text="{Binding InfoText}" Foreground="{StaticResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding LoudnessText}" FontSize="11" TextTrimming="CharacterEllipsis">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLoudnessWarning}" Value="True">
+                                      <Setter Property="Foreground" Value="{StaticResource DangerForeground}"/>
+                                      <Setter Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding TruePeakText}" FontSize="11" TextTrimming="CharacterEllipsis">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTruePeakWarning}" Value="True">
+                                      <Setter Property="Foreground" Value="{StaticResource DangerForeground}"/>
+                                      <Setter Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding LoudnessRangeText}" Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                       TextTrimming="CharacterEllipsis"/>
                           </StackPanel>
                           <Button Grid.Column="3" Style="{StaticResource IconButton}" Content="&#xE711;" ToolTip="この音声を削除"
                                   Command="{Binding DataContext.RemoveAudioTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -469,8 +497,23 @@
                   </ListBox.ItemTemplate>
                 </ListBox>
 
-                <TextBlock Grid.Row="2" Text="表示順に連結します" Foreground="{StaticResource TextSecondary}" FontSize="11"
-                           Margin="0,4,0,0" Visibility="{Binding IsAudioReady, Converter={StaticResource BoolToVisibility}}"/>
+                <StackPanel Grid.Row="2" Visibility="{Binding IsAudioReady, Converter={StaticResource BoolToVisibility}}">
+                  <TextBlock Text="表示順に連結します" Foreground="{StaticResource TextSecondary}" FontSize="11"
+                             Margin="0,4,0,0"/>
+                  <TextBlock Text="{Binding AudioLoudnessSummaryText}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0">
+                    <TextBlock.Style>
+                      <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding HasAudioLoudnessWarning}" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource DangerForeground}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
+                </StackPanel>
               </Grid>
             </Border>
 

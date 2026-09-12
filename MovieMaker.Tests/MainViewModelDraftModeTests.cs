@@ -263,14 +263,32 @@ public class MainViewModelDraftModeTests
             UseDraftMode = true
         };
 
-        Assert.False(viewModel.ClearInputsCommand.CanExecute(null));
+        Assert.True(viewModel.ClearInputsCommand.CanExecute(null));
 
         viewModel.HandleDrop(new[] { audio });
         Assert.True(viewModel.ClearInputsCommand.CanExecute(null));
 
         viewModel.ClearInputsCommand.Execute(null);
+        Assert.Equal(string.Empty, viewModel.Title);
         Assert.Empty(viewModel.AudioTracks);
         Assert.False(viewModel.ClearInputsCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void ClearInputsCommand_ClearsTitleEvenWhenNoMediaInputExists()
+    {
+        var viewModel = new MainViewModel
+        {
+            Title = "manual-title"
+        };
+
+        Assert.True(viewModel.ClearInputsCommand.CanExecute(null));
+
+        viewModel.ClearInputsCommand.Execute(null);
+
+        Assert.Equal(string.Empty, viewModel.Title);
+        Assert.False(viewModel.ClearInputsCommand.CanExecute(null));
+        Assert.Equal("準備してください", viewModel.StatusMessage);
     }
 
     [Fact]

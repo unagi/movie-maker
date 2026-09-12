@@ -171,6 +171,41 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool HasAudioLoudnessWarning => AudioTracks.Any(track =>
+        track.IsLoudnessWarning || track.IsTruePeakWarning);
+
+    public string AudioLoudnessSummaryText
+    {
+        get
+        {
+            if (!IsAudioReady)
+            {
+                return string.Empty;
+            }
+
+            var warnings = AudioTracks
+                .Where(track => track.IsLoudnessWarning || track.IsTruePeakWarning)
+                .Select(track => $"{track.FileName}: {track.LoudnessText} / {track.TruePeakText}")
+                .ToArray();
+            if (warnings.Length > 0)
+            {
+                return $"音量警告: {string.Join(" / ", warnings)}";
+            }
+
+            if (AudioTracks.Any(track => !track.IsLoudnessAnalysisComplete))
+            {
+                return "音量解析中...";
+            }
+
+            if (AudioTracks.Any(track => !track.IsLoudnessAnalysisAvailable))
+            {
+                return "音量を解析できないファイルがあります";
+            }
+
+            return "音量: LUFS / True Peakともに警告なし";
+        }
+    }
+
     public string ImageFileLabel
     {
         get => _imageFileLabel;
@@ -298,7 +333,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool CanClearInputs => !IsEncoding && (!string.IsNullOrWhiteSpace(_imagePath) || IsAudioReady);
+    public bool CanClearInputs => !IsEncoding &&
+        (!string.IsNullOrWhiteSpace(Title) || !string.IsNullOrWhiteSpace(_imagePath) || IsAudioReady);
 
     public EncodeProfile SelectedProfile
     {
@@ -838,6 +874,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void ClearInputs()
     {
+        var titleChanged = !string.IsNullOrEmpty(_title);
+        _title = string.Empty;
+        _autoFilledTitle = null;
+        _draftImagePreview = null;
+
+        if (titleChanged)
+        {
+            OnPropertyChanged(nameof(Title));
+        }
+
         _imagePath = null;
         AudioTracks.Clear();
         _audioDurationSeconds = null;
@@ -995,6 +1041,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsAudioReady));
         OnPropertyChanged(nameof(AudioStatusText));
         OnPropertyChanged(nameof(AudioQueueSummaryText));
+        OnPropertyChanged(nameof(AudioLoudnessSummaryText));
+        OnPropertyChanged(nameof(HasAudioLoudnessWarning));
         OnPropertyChanged(nameof(HasNoAudioTracks));
         OnPropertyChanged(nameof(IsOutputReady));
         OnPropertyChanged(nameof(OutputStatusText));
@@ -1086,7 +1134,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private async Task UpdateAudioTrackInfoAsync(AudioTrackItem track)
     {
         var ffmpegPath = EncodingService.ResolveFfmpegPath();
-        var info = await EncodingService.GetAudioInfoAsync(track.Path, ffmpegPath);
+        AudioInfo? info = null;
+        AudioLoudnessResult? loudness = null;
+        try
+        {
+            var infoTask = EncodingService.GetAudioInfoAsync(track.Path, ffmpegPath);
+            var loudnessTask = EncodingService.GetAudioLoudnessAsync(track.Path, ffmpegPath);
+            await Task.WhenAll(infoTask, loudnessTask);
+            info = infoTask.Result;
+            loudness = loudnessTask.Result;
+        }
+        catch
+        {
+            // Individual analysis failures are displayed as unavailable and do not block encoding.
+        }
+
         if (!AudioTracks.Contains(track))
         {
             return;
@@ -1099,6 +1161,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _ => FormatAudioInfo(info)
         };
         track.ApplyAnalysis(infoText, info?.DurationSeconds);
+        var isLoudnessWarning = loudness?.Status is AudioLoudnessStatus.TooQuiet or AudioLoudnessStatus.TooLoud;
+        track.ApplyLoudnessAnalysis(
+            $"音量: {FormatAudioLoudness(loudness)}",
+            isLoudnessWarning,
+            loudness != null,
+            $"True Peak: {FormatAudioTruePeak(loudness)}",
+            loudness?.TruePeakStatus is AudioTruePeakStatus.TooHigh,
+            $"LRA: {FormatAudioLoudnessRange(loudness)}");
         RecalculateAudioDuration();
         NotifyStatusChanged();
     }
@@ -1153,6 +1223,50 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         return parts.Count == 0 ? "情報取得不可" : string.Join(" / ", parts);
+    }
+
+    private static string FormatAudioLoudness(AudioLoudnessResult? loudness)
+    {
+        if (loudness == null)
+        {
+            return "解析不可";
+        }
+
+        var value = double.IsNegativeInfinity(loudness.IntegratedLufs)
+            ? "-∞"
+            : loudness.IntegratedLufs.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+
+        return loudness.Status switch
+        {
+            AudioLoudnessStatus.TooQuiet => $"{value} LUFS（小さすぎます）",
+            AudioLoudnessStatus.TooLoud => $"{value} LUFS（大きすぎます）",
+            _ => $"{value} LUFS（適正）"
+        };
+    }
+
+    private static string FormatAudioTruePeak(AudioLoudnessResult? loudness)
+    {
+        if (loudness?.TruePeakDbtp is not double truePeakDbtp)
+        {
+            return "解析不可";
+        }
+
+        var value = double.IsNegativeInfinity(truePeakDbtp)
+            ? "-∞"
+            : truePeakDbtp.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+
+        return loudness.TruePeakStatus switch
+        {
+            AudioTruePeakStatus.TooHigh => $"{value} dBTP（高すぎます）",
+            _ => $"{value} dBTP（適正）"
+        };
+    }
+
+    private static string FormatAudioLoudnessRange(AudioLoudnessResult? loudness)
+    {
+        return loudness?.LoudnessRangeLu is double loudnessRangeLu
+            ? loudnessRangeLu.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " LU"
+            : "解析不可";
     }
 
     private static string FormatDuration(double seconds)
@@ -1375,9 +1489,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             if (result.Success)
             {
+                var outputLoudness = await EncodingService.GetAudioLoudnessAsync(result.OutputPath, ffmpegPath);
+                var loudnessText =
+                    $"{FormatAudioLoudness(outputLoudness)} / " +
+                    $"TP: {FormatAudioTruePeak(outputLoudness)} / " +
+                    $"LRA: {FormatAudioLoudnessRange(outputLoudness)}";
                 StatusMessage = string.IsNullOrWhiteSpace(result.Encoder)
-                    ? $"完了: {result.OutputPath}"
-                    : $"完了: {result.OutputPath} (Encoder: {result.Encoder})";
+                    ? $"完了: {result.OutputPath} / 出力音声: {loudnessText}"
+                    : $"完了: {result.OutputPath} (Encoder: {result.Encoder}) / 出力音声: {loudnessText}";
             }
             else
             {

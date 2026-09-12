@@ -36,8 +36,34 @@ public sealed record AudioInfo(
     string? SampleFormat,
     double? DurationSeconds);
 
+public enum AudioLoudnessStatus
+{
+    WithinTarget,
+    TooQuiet,
+    TooLoud
+}
+
+public enum AudioTruePeakStatus
+{
+    Unknown,
+    WithinTarget,
+    TooHigh
+}
+
+public sealed record AudioLoudnessResult(
+    double IntegratedLufs,
+    AudioLoudnessStatus Status,
+    double? TruePeakDbtp = null,
+    double? LoudnessRangeLu = null,
+    AudioTruePeakStatus TruePeakStatus = AudioTruePeakStatus.Unknown);
+
 public static class EncodingService
 {
+    public const double TargetIntegratedLufs = -14.0;
+    public const double LoudnessWarningLowerBoundLufs = -16.0;
+    public const double LoudnessWarningUpperBoundLufs = -12.0;
+    public const double TruePeakWarningLimitDbtp = -1.0;
+
     private sealed record VideoEncoder(string Name, string DisplayName);
 
     private static readonly VideoEncoder LibX264 = new("libx264", "CPU (libx264)");
@@ -342,6 +368,153 @@ public static class EncodingService
         {
             document.Dispose();
         }
+    }
+
+    public static async Task<AudioLoudnessResult?> GetAudioLoudnessAsync(string audioPath, string? ffmpegPath = null)
+    {
+        if (!File.Exists(audioPath))
+        {
+            return null;
+        }
+
+        var executablePath = string.IsNullOrWhiteSpace(ffmpegPath) ? ResolveFfmpegPath() : ffmpegPath;
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            psi.ArgumentList.Add("-hide_banner");
+            psi.ArgumentList.Add("-nostdin");
+            psi.ArgumentList.Add("-nostats");
+            psi.ArgumentList.Add("-i");
+            psi.ArgumentList.Add(audioPath);
+            psi.ArgumentList.Add("-af");
+            psi.ArgumentList.Add("loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json");
+            psi.ArgumentList.Add("-f");
+            psi.ArgumentList.Add("null");
+            psi.ArgumentList.Add("NUL");
+
+            using var process = Process.Start(psi);
+            if (process == null)
+            {
+                return null;
+            }
+
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            await Task.WhenAll(outputTask, errorTask);
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode != 0)
+            {
+                return null;
+            }
+
+            return ParseAudioLoudnessOutput($"{outputTask.Result}\n{errorTask.Result}");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static AudioLoudnessResult ClassifyIntegratedLoudness(double integratedLufs)
+    {
+        var status = integratedLufs < LoudnessWarningLowerBoundLufs
+            ? AudioLoudnessStatus.TooQuiet
+            : integratedLufs > LoudnessWarningUpperBoundLufs
+                ? AudioLoudnessStatus.TooLoud
+                : AudioLoudnessStatus.WithinTarget;
+
+        return new AudioLoudnessResult(integratedLufs, status);
+    }
+
+    public static AudioTruePeakStatus ClassifyTruePeak(double truePeakDbtp)
+    {
+        if (double.IsNaN(truePeakDbtp))
+        {
+            return AudioTruePeakStatus.Unknown;
+        }
+
+        return truePeakDbtp > TruePeakWarningLimitDbtp
+            ? AudioTruePeakStatus.TooHigh
+            : AudioTruePeakStatus.WithinTarget;
+    }
+
+    public static AudioLoudnessResult? ParseAudioLoudnessOutput(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return null;
+        }
+
+        var jsonStart = output.IndexOf('{');
+        var jsonEnd = output.LastIndexOf('}');
+        if (jsonStart < 0 || jsonEnd <= jsonStart)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(output[jsonStart..(jsonEnd + 1)]);
+            if (!document.RootElement.TryGetProperty("input_i", out var inputLoudness) ||
+                !document.RootElement.TryGetProperty("input_tp", out var inputTruePeak) ||
+                !document.RootElement.TryGetProperty("input_lra", out var inputLoudnessRange))
+            {
+                return null;
+            }
+
+            var integratedLufs = ParseLoudnessMetric(inputLoudness);
+            var truePeakDbtp = ParseLoudnessMetric(inputTruePeak);
+            var loudnessRangeLu = ParseLoudnessMetric(inputLoudnessRange);
+            if (!integratedLufs.HasValue || !truePeakDbtp.HasValue || !loudnessRangeLu.HasValue)
+            {
+                return null;
+            }
+
+            var result = ClassifyIntegratedLoudness(integratedLufs.Value);
+            return result with
+            {
+                TruePeakDbtp = truePeakDbtp.Value,
+                LoudnessRangeLu = loudnessRangeLu.Value,
+                TruePeakStatus = ClassifyTruePeak(truePeakDbtp.Value)
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static double? ParseLoudnessMetric(JsonElement element)
+    {
+        var text = element.ValueKind == JsonValueKind.Number
+            ? element.GetRawText()
+            : element.ValueKind == JsonValueKind.String
+                ? element.GetString()
+                : null;
+
+        if (string.Equals(text, "-inf", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "-infinity", StringComparison.OrdinalIgnoreCase))
+        {
+            return double.NegativeInfinity;
+        }
+
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
     }
 
     private static async Task<double?> ResolveShortsTrimTargetSecondsAsync(
