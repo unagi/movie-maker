@@ -261,6 +261,10 @@
                   Background="{StaticResource AppBlueSoft}" BorderBrush="{StaticResource AppBlueSoft}"
                   Foreground="{StaticResource AppBlue}" FontSize="16" Content="&#xE713;"
                   FontFamily="{StaticResource IconFont}"/>
+          <Button Width="52" Height="34" Command="{Binding OpenLoudnessAnalysisCommand}" Margin="0,0,8,0"
+                  Background="{StaticResource AppBlueSoft}" BorderBrush="{StaticResource AppBlueSoft}"
+                  Foreground="{StaticResource AppBlue}" FontSize="10" FontWeight="Bold" Content="LUFS"
+                  ToolTip="既存動画の音量解析"/>
           <Button Style="{StaticResource TitleBarButton}"
                   Click="MinimizeButton_OnClick"
                   Content="&#xE921;"/>

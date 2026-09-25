@@ -11,6 +11,10 @@ obj/
 # Rider
 .idea/
 
+# Local .NET SDK/cache state and Visual Studio workspace
+.dotnet/
+.vs/
+
 # Visual Studio Code
 .vscode/
 

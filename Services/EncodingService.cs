@@ -399,8 +399,11 @@ public static class EncodingService
             psi.ArgumentList.Add("-nostats");
             psi.ArgumentList.Add("-i");
             psi.ArgumentList.Add(audioPath);
+            psi.ArgumentList.Add("-map");
+            psi.ArgumentList.Add("0:a:0");
             psi.ArgumentList.Add("-af");
             psi.ArgumentList.Add("loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json");
+            psi.ArgumentList.Add("-vn");
             psi.ArgumentList.Add("-f");
             psi.ArgumentList.Add("null");
             psi.ArgumentList.Add("NUL");

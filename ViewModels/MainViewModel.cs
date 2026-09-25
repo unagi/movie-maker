@@ -72,6 +72,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public MainViewModel()
     {
         OpenSettingsCommand = new RelayCommand(_ => OpenSettings());
+        OpenLoudnessAnalysisCommand = new RelayCommand(_ => OpenLoudnessAnalysis());
         OpenOutputFolderCommand = new RelayCommand(_ => OpenFolder(OutputDirectoryPath), _ => Directory.Exists(OutputDirectoryPath));
         OpenArchiveFolderCommand = new RelayCommand(_ => OpenFolder(ArchiveDirectoryPath), _ => Directory.Exists(ArchiveDirectoryPath));
         ClearInputsCommand = new RelayCommand(_ => ClearInputs(), _ => CanClearInputs);
@@ -83,6 +84,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public RelayCommand OpenSettingsCommand { get; }
+    public RelayCommand OpenLoudnessAnalysisCommand { get; }
     public RelayCommand OpenOutputFolderCommand { get; }
     public RelayCommand OpenArchiveFolderCommand { get; }
     public RelayCommand ClearInputsCommand { get; }
@@ -1406,6 +1408,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
             UpdateSettingsLabels();
             UpdateValidation(true);
         }
+    }
+
+    private void OpenLoudnessAnalysis()
+    {
+        var window = new LoudnessAnalysisWindow
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+
+        window.ShowDialog();
     }
 
     private async Task EncodeAsync()

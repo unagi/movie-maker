@@ -1,0 +1,339 @@
+<Window x:Class="MovieMaker.Views.LoudnessAnalysisWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:conv="clr-namespace:MovieMaker.Converters"
+        Title="既存動画の音量解析" Height="680" Width="960" MinHeight="520" MinWidth="920"
+        Background="Transparent" WindowStartupLocation="CenterOwner"
+        WindowStyle="None" AllowsTransparency="True"
+        Icon="pack://application:,,,/Assets/app.ico">
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="0"
+                        ResizeBorderThickness="6"
+                        GlassFrameThickness="0"
+                        UseAeroCaptionButtons="False"/>
+  </shell:WindowChrome.WindowChrome>
+
+  <Window.Resources>
+    <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+    <SolidColorBrush x:Key="TextPrimary" Color="#111827"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#6B7280"/>
+    <SolidColorBrush x:Key="BorderSoft" Color="#E5E7EB"/>
+    <SolidColorBrush x:Key="CardBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AppBlue" Color="#1977F3"/>
+    <SolidColorBrush x:Key="AppBlueSoft" Color="#E8F0FE"/>
+    <SolidColorBrush x:Key="DangerForeground" Color="#D92D20"/>
+    <SolidColorBrush x:Key="SuccessForeground" Color="#027A48"/>
+
+    <Style x:Key="CardStyle" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource CardBackground}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="12"/>
+    </Style>
+
+    <Style x:Key="PrimaryButton" TargetType="Button">
+      <Setter Property="Background" Value="#7FB6E9"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#7FB6E9"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="16,10"/>
+      <Setter Property="MinHeight" Value="40"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="10">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SecondaryButton" TargetType="Button">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="MinHeight" Value="36"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="TitleBarButton" TargetType="Button">
+      <Setter Property="Width" Value="40"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+      <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}" CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#EF4444"/>
+          <Setter Property="Foreground" Value="White"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Border Margin="8">
+      <Border.Effect>
+        <DropShadowEffect Color="#000000" BlurRadius="18" ShadowDepth="0" Opacity="0.2"/>
+      </Border.Effect>
+      <Border Background="#F5F6F8" CornerRadius="12" ClipToBounds="True">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="56"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="60"/>
+          </Grid.RowDefinitions>
+
+          <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,0,0,1"
+                  MouseLeftButtonDown="TitleBar_OnMouseLeftButtonDown">
+            <Grid Margin="20,10,12,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="36" Height="36" CornerRadius="10" Background="{StaticResource AppBlue}" Margin="0,0,12,0">
+                  <TextBlock Text="&#xE9D9;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="16"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel>
+                  <TextBlock Text="既存動画の音量解析" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"/>
+                  <TextBlock Text="動画を複数追加してLUFS / True Peak / LRAを確認" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
+                </StackPanel>
+              </StackPanel>
+              <Button Grid.Column="1" Style="{StaticResource TitleBarButton}"
+                      Content="&#xE8BB;" Click="CloseButton_OnClick"/>
+            </Grid>
+          </Border>
+
+          <Grid Grid.Row="1" Margin="20,16,20,12">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0">
+              <TextBlock Text="解析対象" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"/>
+              <TextBlock Text="既存の動画ファイルをここへドロップしてください。複数ファイルを同時に追加できます。"
+                         FontSize="12" Foreground="{StaticResource TextSecondary}" Margin="0,4,0,10"/>
+            </StackPanel>
+
+            <Border Grid.Row="1" AllowDrop="True" Drop="DropArea_OnDrop" DragEnter="DropArea_OnDragEnter"
+                    DragOver="DropArea_OnDragOver" DragLeave="DropArea_OnDragLeave"
+                    Background="#F9FAFB" BorderBrush="#CBD5E1" BorderThickness="1"
+                    CornerRadius="10" MinHeight="116">
+              <Grid>
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                  <TextBlock Text="&#xE898;" FontFamily="{StaticResource IconFont}" FontSize="26"
+                             Foreground="{StaticResource AppBlue}" HorizontalAlignment="Center"/>
+                  <TextBlock Text="動画ファイルをドロップ" FontSize="15" FontWeight="SemiBold"
+                             Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                  <TextBlock Text="MP4, MOV, MKV, WebM など / 音声を含まない動画は解析不可"
+                             FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <Border Margin="4" Background="#E8F0FE" BorderBrush="#60A5FA" BorderThickness="2"
+                        CornerRadius="8" IsHitTestVisible="False"
+                        Visibility="{Binding IsFileDragOver, Converter={StaticResource BoolToVisibility}}">
+                  <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <TextBlock Text="&#xE898;" FontFamily="{StaticResource IconFont}" FontSize="24"
+                               Foreground="{StaticResource AppBlue}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="ここにドロップして解析" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{StaticResource AppBlue}" Margin="0,8,0,0"/>
+                  </StackPanel>
+                </Border>
+              </Grid>
+            </Border>
+
+            <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" FontSize="12" Foreground="{StaticResource TextSecondary}"
+                       TextWrapping="Wrap" Margin="0,8,0,10"/>
+
+            <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="0">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="1">
+                  <TextBlock Text="動画を追加すると解析結果がここに表示されます"
+                             Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock.Style>
+                      <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding HasItems}" Value="False">
+                            <Setter Property="Visibility" Value="Visible"/>
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
+
+                  <DataGrid ItemsSource="{Binding Items}" AutoGenerateColumns="False" HeadersVisibility="Column"
+                            BorderThickness="0" Background="Transparent" IsReadOnly="True"
+                            CanUserResizeColumns="False" CanUserSortColumns="False"
+                            RowHeaderWidth="0" RowHeight="52" GridLinesVisibility="None"
+                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                            ScrollViewer.VerticalScrollBarVisibility="Auto"
+                            Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibility}}">
+                    <DataGrid.Resources>
+                      <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                        <Setter Property="FontSize" Value="11"/>
+                        <Setter Property="FontWeight" Value="SemiBold"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                        <Setter Property="Padding" Value="10,0"/>
+                        <Setter Property="BorderThickness" Value="0"/>
+                      </Style>
+                      <Style TargetType="DataGridRow">
+                        <Setter Property="Background" Value="#F9FAFB"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+                        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                      </Style>
+                      <Style TargetType="DataGridCell">
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="BorderThickness" Value="0"/>
+                        <Setter Property="Padding" Value="0"/>
+                      </Style>
+                    </DataGrid.Resources>
+                    <DataGrid.Columns>
+                      <DataGridTemplateColumn Header="ファイル" Width="320">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <Grid Margin="10,0" MinWidth="0">
+                              <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                              </Grid.RowDefinitions>
+                              <TextBlock Text="{Binding FileName}" FontSize="12" FontWeight="SemiBold"
+                                         Foreground="{StaticResource TextPrimary}" TextTrimming="CharacterEllipsis"
+                                         HorizontalAlignment="Stretch" ToolTip="{Binding Path}"/>
+                              <TextBlock Grid.Row="1" Text="{Binding Path}" FontSize="10"
+                                         Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis"
+                                         HorizontalAlignment="Stretch"/>
+                            </Grid>
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTemplateColumn Header="LUFS" Width="150">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <TextBlock Text="{Binding LoudnessText}" FontSize="11" Foreground="{StaticResource TextSecondary}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="10,0"/>
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTemplateColumn Header="True Peak" Width="150">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <TextBlock Text="{Binding TruePeakText}" FontSize="11" Foreground="{StaticResource TextSecondary}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="10,0"/>
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTemplateColumn Header="LRA" Width="100">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <TextBlock Text="{Binding LoudnessRangeText}" FontSize="11" Foreground="{StaticResource TextSecondary}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="10,0"/>
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTemplateColumn Header="判定" Width="70">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <TextBlock Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="10,0">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="{StaticResource SuccessForeground}"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsWarning}" Value="True">
+                                      <Setter Property="Foreground" Value="{StaticResource DangerForeground}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsAnalysisAvailable}" Value="False">
+                                      <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTemplateColumn Header="" Width="70">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <Button Content="削除" Width="58" Height="28" HorizontalAlignment="Center"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Command="{Binding DataContext.RemoveItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"/>
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                  </DataGrid>
+                </Grid>
+              </Grid>
+            </Border>
+          </Grid>
+
+          <Grid Grid.Row="2" Margin="20,0,20,12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding SummaryText}" Foreground="{StaticResource TextSecondary}"
+                       VerticalAlignment="Center" TextWrapping="Wrap"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+              <Button Content="一覧をクリア" Width="110" Height="38" Margin="0,0,8,0"
+                      Style="{StaticResource SecondaryButton}" Command="{Binding ClearCommand}"/>
+              <Button Content="閉じる" Width="100" Height="38" Style="{StaticResource PrimaryButton}"
+                      Click="CloseButton_OnClick"/>
+            </StackPanel>
+          </Grid>
+        </Grid>
+      </Border>
+    </Border>
+  </Grid>
+</Window>
