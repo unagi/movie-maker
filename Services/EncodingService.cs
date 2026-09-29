@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Text.Json;
+using System.Drawing;
 using MovieMaker.Models;
 
 namespace MovieMaker.Services;
@@ -18,7 +20,14 @@ public sealed record EncodeRequest(
     VideoOrientation Orientation,
     EncodeProfile Profile,
     string LogPath,
-    DraftAudioQuality DraftAudioQuality);
+    DraftAudioQuality DraftAudioQuality,
+    IReadOnlyList<string>? TrackImagePaths = null,
+    IReadOnlyList<LoudnessNormalizationTarget>? TrackNormalizationTargets = null,
+    int ShortsMaximumSeconds = 60,
+    bool NormalTextOverlayEnabled = true,
+    double OneMinuteShortsOffsetSeconds = 3,
+    double ThreeMinuteShortsOffsetSeconds = 3,
+    string? SourceImagePath = null);
 
 public sealed record EncodeResult(
     bool Success,
@@ -57,12 +66,55 @@ public sealed record AudioLoudnessResult(
     double? LoudnessRangeLu = null,
     AudioTruePeakStatus TruePeakStatus = AudioTruePeakStatus.Unknown);
 
+public sealed record LoudnessNormalizationMeasurements(
+    double IntegratedLufs,
+    double TruePeakDbtp,
+    double LoudnessRangeLu,
+    double ThresholdLufs);
+
+public sealed record LoudnessNormalizationTarget(double IntegratedLufs, double TruePeakDbtp);
+
 public static class EncodingService
 {
+    public static bool ValidateProductionInput(int imageWidth, int imageHeight, int audioCount,
+        EncodeProfile profile, int maximumSeconds, double audioDurationSeconds, out string error)
+    {
+        error = string.Empty;
+        if (imageWidth <= 0 || imageHeight <= 0 || audioCount < 1 ||
+            maximumSeconds is < 1 or > 180 || !double.IsFinite(audioDurationSeconds) || audioDurationSeconds <= 0)
+        {
+            error = "入力画像・音声・Shorts上限を確認してください。";
+            return false;
+        }
+        if (profile is not (EncodeProfile.CopyrightCheckProduction or EncodeProfile.Standard))
+        {
+            error = "出力種別が不正です。";
+            return false;
+        }
+        if (profile == EncodeProfile.CopyrightCheckProduction &&
+            (imageHeight <= imageWidth || audioCount != 1 || audioDurationSeconds > maximumSeconds))
+        {
+            error = "Shortsには縦画像1枚と上限以内の音声1本が必要です。";
+            return false;
+        }
+        if (profile == EncodeProfile.Standard && imageWidth < imageHeight)
+        {
+            error = "通常動画には横向きまたは正方形の画像が必要です。";
+            return false;
+        }
+        return true;
+    }
     public const double TargetIntegratedLufs = -14.0;
+    public const double TargetTruePeakDbtp = -1.0;
     public const double LoudnessWarningLowerBoundLufs = -16.0;
     public const double LoudnessWarningUpperBoundLufs = -12.0;
     public const double TruePeakWarningLimitDbtp = -1.0;
+    public const double MinimumTargetIntegratedLufs = -70.0;
+    public const double MaximumTargetIntegratedLufs = -5.0;
+    public const double MinimumTargetTruePeakDbtp = -8.0;
+    public const double MaximumTargetTruePeakDbtp = 0.0;
+    private const double TargetLoudnessRangeLu = 11.0;
+    private const double LossyEncodingTruePeakHeadroomDb = 1.0;
 
     private sealed record VideoEncoder(string Name, string DisplayName);
 
@@ -119,6 +171,136 @@ public static class EncodingService
             return new EncodeResult(false, request.OutputPath, request.LogPath, "ffmpegが見つかりません。", string.Empty);
         }
 
+        if (request.Profile == EncodeProfile.Standard && request.NormalTextOverlayEnabled &&
+            (request.TrackImagePaths == null || request.TrackImagePaths.Count != request.AudioPaths.Count ||
+             request.TrackImagePaths.Count == 0 || request.TrackImagePaths.Any(path => !File.Exists(path))))
+        {
+            return new EncodeResult(false, request.OutputPath, request.LogPath, "通常モードの音声トラック画像が不足しています。", string.Empty);
+        }
+
+        if (request.Profile == EncodeProfile.Standard && request.NormalTextOverlayEnabled &&
+            (string.IsNullOrWhiteSpace(request.SourceImagePath) || !File.Exists(request.SourceImagePath)))
+        {
+            return new EncodeResult(false, request.OutputPath, request.LogPath,
+                "通常動画の元背景画像が見つかりません。", string.Empty);
+        }
+
+        if (request.Profile == EncodeProfile.Standard && !request.NormalTextOverlayEnabled &&
+            request.TrackImagePaths != null)
+        {
+            return new EncodeResult(false, request.OutputPath, request.LogPath,
+                "文字入れなしの通常動画には共通画像1枚だけを指定してください。", string.Empty);
+        }
+
+        if (request.Profile == EncodeProfile.Standard &&
+            (request.TrackNormalizationTargets == null || request.TrackNormalizationTargets.Count != request.AudioPaths.Count ||
+             request.TrackNormalizationTargets.Any(target => !AreValidNormalizationTargets(target.IntegratedLufs, target.TruePeakDbtp))))
+        {
+            return new EncodeResult(false, request.OutputPath, request.LogPath, "ノーマライズ目標値が範囲外です。", string.Empty);
+        }
+
+        try
+        {
+            var policySettings = new AppSettings
+            {
+                ShortsMaximumSeconds = request.ShortsMaximumSeconds,
+                OneMinuteShortsOffsetSeconds = request.OneMinuteShortsOffsetSeconds,
+                ThreeMinuteShortsOffsetSeconds = request.ThreeMinuteShortsOffsetSeconds
+            };
+            if (request.Profile != EncodeProfile.DraftPreview && !ShortsPolicy.AreSettingsValid(policySettings))
+                return new EncodeResult(false, request.OutputPath, request.LogPath, "Shorts設定を修正してください。", string.Empty);
+            if (request.Profile != EncodeProfile.DraftPreview && request.ShortsMaximumSeconds is < 1 or > 180)
+                return new EncodeResult(false, request.OutputPath, request.LogPath, "Shorts上限が範囲外です。", string.Empty);
+
+            var outputDirectory = Path.GetDirectoryName(request.OutputPath);
+            if (string.IsNullOrWhiteSpace(outputDirectory))
+                return new EncodeResult(false, request.OutputPath, request.LogPath, "出力先が不正です。", string.Empty);
+            Directory.CreateDirectory(outputDirectory);
+            var snapshotDirectory = Path.Combine(outputDirectory, ".movie-maker-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(snapshotDirectory);
+            try
+            {
+                var imageCopy = Path.Combine(snapshotDirectory, "image" + Path.GetExtension(request.ImagePath));
+                File.Copy(request.ImagePath, imageCopy);
+                string? sourceImageCopy = null;
+                if (request.Profile == EncodeProfile.Standard && request.NormalTextOverlayEnabled)
+                {
+                    sourceImageCopy = Path.Combine(snapshotDirectory,
+                        "source-image" + Path.GetExtension(request.SourceImagePath!));
+                    File.Copy(request.SourceImagePath!, sourceImageCopy);
+                }
+                var audioCopies = request.AudioPaths.Select((path, index) =>
+                {
+                    var copy = Path.Combine(snapshotDirectory, $"audio-{index}" + Path.GetExtension(path));
+                    File.Copy(path, copy);
+                    return copy;
+                }).ToArray();
+                IReadOnlyList<string>? trackImageCopies = request.TrackImagePaths?.Select((path, index) =>
+                {
+                    var copy = Path.Combine(snapshotDirectory, $"overlay-{index}" + Path.GetExtension(path));
+                    File.Copy(path, copy);
+                    return copy;
+                }).ToArray();
+                using var bitmap = Image.FromFile(sourceImageCopy ?? imageCopy);
+                if (request.Profile == EncodeProfile.Standard && request.NormalTextOverlayEnabled &&
+                    trackImageCopies!.Any(path => !HasNonPortraitDimensions(path)))
+                    return new EncodeResult(false, request.OutputPath, request.LogPath,
+                        "文字入れ画像の実寸が通常動画に対応していません。", string.Empty);
+                var durations = await GetTrackDurationsAsync(audioCopies, request.FfmpegPath);
+                if (durations == null)
+                    return new EncodeResult(false, request.OutputPath, request.LogPath, "音声の長さを取得できませんでした。", string.Empty);
+                var totalDuration = durations.Sum();
+                if (request.Profile != EncodeProfile.DraftPreview &&
+                    !ValidateProductionInput(bitmap.Width, bitmap.Height, audioCopies.Length, request.Profile,
+                        request.ShortsMaximumSeconds, totalDuration, out var inputError))
+                    return new EncodeResult(false, request.OutputPath, request.LogPath, inputError, string.Empty);
+                if (request.Profile == EncodeProfile.CopyrightCheckProduction &&
+                    (request.Orientation != VideoOrientation.Vertical || request.NormalTextOverlayEnabled || trackImageCopies != null))
+                    return new EncodeResult(false, request.OutputPath, request.LogPath, "Shorts要求が入力条件と矛盾しています。", string.Empty);
+                if (request.Profile == EncodeProfile.Standard && request.Orientation != VideoOrientation.Horizontal)
+                    return new EncodeResult(false, request.OutputPath, request.LogPath, "通常動画要求が入力条件と矛盾しています。", string.Empty);
+                var stagedOutput = Path.Combine(outputDirectory, ".movie-maker-" + Guid.NewGuid().ToString("N") + ".mp4");
+                var executionRequest = request with
+                {
+                    ImagePath = imageCopy,
+                    SourceImagePath = sourceImageCopy,
+                    AudioPaths = audioCopies,
+                    TrackImagePaths = trackImageCopies,
+                    OutputPath = stagedOutput
+                };
+                try
+                {
+                    return await EncodeSnapshotAsync(executionRequest, request.OutputPath, durations, policySettings);
+                }
+                finally
+                {
+                    try { if (File.Exists(stagedOutput)) File.Delete(stagedOutput); }
+                    catch (IOException) { /* Keep the result; cleanup is best effort. */ }
+                    catch (UnauthorizedAccessException) { /* Keep the result; cleanup is best effort. */ }
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(snapshotDirectory, recursive: true); }
+                catch (IOException) { /* temporary cleanup is best effort */ }
+                catch (UnauthorizedAccessException) { /* temporary cleanup is best effort */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            return new EncodeResult(false, request.OutputPath, request.LogPath, ex.Message, string.Empty);
+        }
+    }
+
+    private static bool HasNonPortraitDimensions(string path)
+    {
+        using var image = Image.FromFile(path);
+        return image.Width >= image.Height;
+    }
+
+    private static async Task<EncodeResult> EncodeSnapshotAsync(EncodeRequest request, string finalOutputPath,
+        IReadOnlyList<double> sourceDurations, AppSettings policySettings)
+    {
         try
         {
             var logDirectory = Path.GetDirectoryName(request.LogPath);
@@ -131,17 +313,45 @@ public static class EncodingService
             var logLock = new object();
 
             var candidates = await GetEncoderCandidatesAsync(request.FfmpegPath, logWriter, logLock);
-            var trimTargetSeconds = await ResolveShortsTrimTargetSecondsAsync(request, logWriter, logLock);
+            var trimTargetSeconds = request.Profile == EncodeProfile.CopyrightCheckProduction &&
+                ShortsPolicy.TryGetTrimTargetSeconds(sourceDurations[0], out var targetSeconds, policySettings)
+                ? targetSeconds : (double?)null;
+            var segmentDurations = request.Profile == EncodeProfile.Standard ? sourceDurations : null;
+            if (request.Profile == EncodeProfile.Standard && segmentDurations == null)
+            {
+                return new EncodeResult(false, request.OutputPath, request.LogPath,
+                    "音声トラックの長さを取得できませんでした。", string.Empty);
+            }
+            var normalizationMeasurements = request.Profile == EncodeProfile.Standard
+                ? await GetNormalizationMeasurementsAsync(request.AudioPaths, request.FfmpegPath,
+                    request.TrackNormalizationTargets!, logWriter, logLock)
+                : null;
+            if (request.Profile == EncodeProfile.Standard && normalizationMeasurements == null)
+            {
+                return new EncodeResult(false, request.OutputPath, request.LogPath,
+                    "音声トラックのノーマライズ解析に失敗しました。入力音声とFFmpegログを確認してください。", string.Empty);
+            }
             foreach (var encoder in candidates)
             {
-                var psi = BuildStartInfo(request, encoder, trimTargetSeconds);
+                var psi = BuildStartInfo(request, encoder, trimTargetSeconds, segmentDurations, normalizationMeasurements);
                 WriteLog(logWriter, logLock, $"Encoder: {encoder.DisplayName} ({encoder.Name})");
 
                 var (exitCode, succeeded) = await RunProcessAsync(psi, logWriter, logLock);
                 if (succeeded && File.Exists(request.OutputPath))
                 {
-                    WriteLog(logWriter, logLock, $"Success: {encoder.Name}");
-                    return new EncodeResult(true, request.OutputPath, request.LogPath, null, encoder.DisplayName);
+                    if (request.Profile == EncodeProfile.CopyrightCheckProduction &&
+                        !await IsEncodedDurationWithinLimitAsync(request.OutputPath, request.FfmpegPath,
+                            request.ShortsMaximumSeconds))
+                    {
+                        WriteLog(logWriter, logLock, "Shorts completed duration is unavailable or exceeds limit.");
+                        File.Delete(request.OutputPath);
+                        return new EncodeResult(false, finalOutputPath, request.LogPath,
+                            "完成動画の長さを確認できないか、Shorts上限を超えました。", string.Empty);
+                    }
+                    WriteLog(logWriter, logLock, $"Encoder completed: {encoder.Name}; publishing output.");
+                    logWriter.Dispose();
+                    File.Move(request.OutputPath, finalOutputPath, overwrite: false);
+                    return new EncodeResult(true, finalOutputPath, request.LogPath, null, encoder.DisplayName);
                 }
 
                 WriteLog(logWriter, logLock, $"Failed: {encoder.Name} (ExitCode: {exitCode})");
@@ -159,16 +369,17 @@ public static class EncodingService
                 }
             }
 
-            return new EncodeResult(false, request.OutputPath, request.LogPath,
+            return new EncodeResult(false, finalOutputPath, request.LogPath,
                 "ffmpegが失敗しました (全てのエンコーダで失敗)", string.Empty);
         }
         catch (Exception ex)
         {
-            return new EncodeResult(false, request.OutputPath, request.LogPath, ex.Message, string.Empty);
+            return new EncodeResult(false, finalOutputPath, request.LogPath, ex.Message, string.Empty);
         }
     }
 
-    private static ProcessStartInfo BuildStartInfo(EncodeRequest request, VideoEncoder encoder, double? trimTargetSeconds)
+    private static ProcessStartInfo BuildStartInfo(EncodeRequest request, VideoEncoder encoder, double? trimTargetSeconds,
+        IReadOnlyList<double>? segmentDurations, IReadOnlyList<LoudnessNormalizationMeasurements>? normalizationMeasurements)
     {
         var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile, request.DraftAudioQuality);
         var psi = new ProcessStartInfo
@@ -179,6 +390,28 @@ public static class EncodingService
             UseShellExecute = false,
             CreateNoWindow = true
         };
+
+        if (request.Profile == EncodeProfile.Standard && segmentDurations != null)
+        {
+            AddStandardTrackInputs(psi, request, segmentDurations, options);
+            AddVideoEncoderArgs(psi, encoder, request);
+            psi.ArgumentList.Add("-filter_complex");
+            psi.ArgumentList.Add(BuildStandardTrackFilter(segmentDurations, options, normalizationMeasurements!,
+                request.TrackNormalizationTargets!));
+            psi.ArgumentList.Add("-map");
+            psi.ArgumentList.Add("[vout]");
+            psi.ArgumentList.Add("-map");
+            psi.ArgumentList.Add("[aout]");
+            psi.ArgumentList.Add("-r");
+            psi.ArgumentList.Add(options.FrameRate.ToString(CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("-pix_fmt");
+            psi.ArgumentList.Add("yuv420p");
+            AddOutputAudioArgs(psi, options);
+            psi.ArgumentList.Add("-movflags");
+            psi.ArgumentList.Add("+faststart");
+            psi.ArgumentList.Add(request.OutputPath);
+            return psi;
+        }
 
         psi.ArgumentList.Add("-loop");
         psi.ArgumentList.Add("1");
@@ -217,17 +450,12 @@ public static class EncodingService
             psi.ArgumentList.Add("1:a:0");
         }
 
-        psi.ArgumentList.Add("-c:a");
-        psi.ArgumentList.Add("aac");
-        psi.ArgumentList.Add("-b:a");
-        psi.ArgumentList.Add(options.AudioBitrate);
-        psi.ArgumentList.Add("-ar");
-        psi.ArgumentList.Add(options.AudioSampleRate);
+        AddOutputAudioArgs(psi, options);
 
-        if (trimTargetSeconds.HasValue)
+        if (trimTargetSeconds.HasValue || request.Profile == EncodeProfile.CopyrightCheckProduction)
         {
             psi.ArgumentList.Add("-t");
-            psi.ArgumentList.Add(FormatSeconds(trimTargetSeconds.Value));
+            psi.ArgumentList.Add(FormatSeconds(trimTargetSeconds ?? request.ShortsMaximumSeconds));
         }
 
         psi.ArgumentList.Add("-shortest");
@@ -238,10 +466,203 @@ public static class EncodingService
         return psi;
     }
 
+    private static void AddOutputAudioArgs(ProcessStartInfo psi, EncodingOptions options)
+    {
+        psi.ArgumentList.Add("-c:a");
+        psi.ArgumentList.Add("aac");
+        psi.ArgumentList.Add("-b:a");
+        psi.ArgumentList.Add(options.AudioBitrate);
+        psi.ArgumentList.Add("-ar");
+        psi.ArgumentList.Add(options.AudioSampleRate);
+    }
+
+    private static void AddStandardTrackInputs(ProcessStartInfo psi, EncodeRequest request,
+        IReadOnlyList<double> durations, EncodingOptions options)
+    {
+        for (var index = 0; index < request.AudioPaths.Count; index++)
+        {
+            psi.ArgumentList.Add("-loop");
+            psi.ArgumentList.Add("1");
+            psi.ArgumentList.Add("-framerate");
+            psi.ArgumentList.Add(options.FrameRate.ToString(CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("-t");
+            psi.ArgumentList.Add(FormatSeconds(durations[index]));
+            psi.ArgumentList.Add("-i");
+            psi.ArgumentList.Add(request.NormalTextOverlayEnabled ? request.TrackImagePaths![index] : request.ImagePath);
+            psi.ArgumentList.Add("-i");
+            psi.ArgumentList.Add(request.AudioPaths[index]);
+        }
+    }
+
+    private static string BuildStandardTrackFilter(IReadOnlyList<double> durations, EncodingOptions options,
+        IReadOnlyList<LoudnessNormalizationMeasurements> measurements, IReadOnlyList<LoudnessNormalizationTarget> targets)
+    {
+        var filters = new List<string>();
+        var concatInputs = new StringBuilder();
+        for (var index = 0; index < durations.Count; index++)
+        {
+            var videoInput = index * 2;
+            var audioInput = videoInput + 1;
+            var duration = FormatSeconds(durations[index]);
+            filters.Add($"[{videoInput}:v]scale={options.Width}:{options.Height}:force_original_aspect_ratio=decrease," +
+                $"pad={options.Width}:{options.Height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1," +
+                $"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]");
+            var measured = measurements[index];
+            var target = targets[index];
+            var filterTruePeakTarget = GetFilterTruePeakTarget(target.TruePeakDbtp);
+            filters.Add($"[{audioInput}:a]atrim=duration={duration},asetpts=PTS-STARTPTS," +
+                $"loudnorm=I={FormatMetric(target.IntegratedLufs)}:TP={FormatMetric(filterTruePeakTarget)}:" +
+                $"LRA={FormatMetric(TargetLoudnessRangeLu)}:measured_I={FormatMetric(measured.IntegratedLufs)}:" +
+                $"measured_TP={FormatMetric(measured.TruePeakDbtp)}:measured_LRA={FormatMetric(measured.LoudnessRangeLu)}:" +
+                $"measured_thresh={FormatMetric(measured.ThresholdLufs)}:linear=true," +
+                $"aresample={options.AudioSampleRate},aformat=channel_layouts=stereo[a{index}]");
+            concatInputs.Append($"[v{index}][a{index}]");
+        }
+
+        filters.Add($"{concatInputs}concat=n={durations.Count}:v=1:a=1[vout][aout]");
+        return string.Join(';', filters);
+    }
+
+    private static async Task<IReadOnlyList<double>?> GetTrackDurationsAsync(
+        IReadOnlyList<string> audioPaths, string? ffmpegPath)
+    {
+        var durations = new List<double>(audioPaths.Count);
+        foreach (var audioPath in audioPaths)
+        {
+            var info = await GetAudioInfoAsync(audioPath, ffmpegPath);
+            if (info?.DurationSeconds is not double duration || !double.IsFinite(duration) || duration <= 0)
+            {
+                return null;
+            }
+            durations.Add(duration);
+        }
+        return durations;
+    }
+
+    private static async Task<IReadOnlyList<LoudnessNormalizationMeasurements>?> GetNormalizationMeasurementsAsync(
+        IReadOnlyList<string> audioPaths, string ffmpegPath, IReadOnlyList<LoudnessNormalizationTarget> targets,
+        StreamWriter logWriter, object logLock)
+    {
+        var measurements = new List<LoudnessNormalizationMeasurements>(audioPaths.Count);
+        foreach (var audioPath in audioPaths)
+        {
+            var measurement = await AnalyzeLoudnessForNormalizationAsync(
+                audioPath, ffmpegPath, targets[measurements.Count].IntegratedLufs, targets[measurements.Count].TruePeakDbtp);
+            if (measurement == null)
+            {
+                WriteLog(logWriter, logLock, $"Loudness normalization analysis failed: {audioPath}");
+                return null;
+            }
+
+            measurements.Add(measurement);
+            WriteLog(logWriter, logLock,
+                $"Loudness normalization input: {audioPath} I={FormatMetric(measurement.IntegratedLufs)} LUFS " +
+                $"TP={FormatMetric(measurement.TruePeakDbtp)} dBTP LRA={FormatMetric(measurement.LoudnessRangeLu)} LU");
+        }
+
+        return measurements;
+    }
+
+    private static async Task<LoudnessNormalizationMeasurements?> AnalyzeLoudnessForNormalizationAsync(
+        string audioPath, string ffmpegPath, double targetIntegratedLufs, double targetTruePeakDbtp)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("-hide_banner");
+        psi.ArgumentList.Add("-nostdin");
+        psi.ArgumentList.Add("-nostats");
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(audioPath);
+        psi.ArgumentList.Add("-map");
+        psi.ArgumentList.Add("0:a:0");
+        psi.ArgumentList.Add("-af");
+        psi.ArgumentList.Add($"loudnorm=I={FormatMetric(targetIntegratedLufs)}:TP={FormatMetric(GetFilterTruePeakTarget(targetTruePeakDbtp))}:" +
+            $"LRA={FormatMetric(TargetLoudnessRangeLu)}:print_format=json");
+        psi.ArgumentList.Add("-vn");
+        psi.ArgumentList.Add("-f");
+        psi.ArgumentList.Add("null");
+        psi.ArgumentList.Add("NUL");
+
+        using var process = Process.Start(psi);
+        if (process == null)
+        {
+            return null;
+        }
+
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(outputTask, errorTask);
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+        {
+            return null;
+        }
+
+        return ParseLoudnessNormalizationMeasurements($"{outputTask.Result}\n{errorTask.Result}");
+    }
+
+    private static LoudnessNormalizationMeasurements? ParseLoudnessNormalizationMeasurements(string output)
+    {
+        var jsonStart = output.IndexOf('{');
+        var jsonEnd = output.LastIndexOf('}');
+        if (jsonStart < 0 || jsonEnd <= jsonStart)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(output[jsonStart..(jsonEnd + 1)]);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("input_i", out var inputLoudness) ||
+                !root.TryGetProperty("input_tp", out var inputTruePeak) ||
+                !root.TryGetProperty("input_lra", out var inputLoudnessRange) ||
+                !root.TryGetProperty("input_thresh", out var inputThreshold))
+            {
+                return null;
+            }
+
+            var integrated = ParseLoudnessMetric(inputLoudness);
+            var truePeak = ParseLoudnessMetric(inputTruePeak);
+            var loudnessRange = ParseLoudnessMetric(inputLoudnessRange);
+            var threshold = ParseLoudnessMetric(inputThreshold);
+            if (!integrated.HasValue || !truePeak.HasValue || !loudnessRange.HasValue || !threshold.HasValue ||
+                !double.IsFinite(integrated.Value) || !double.IsFinite(truePeak.Value) ||
+                !double.IsFinite(loudnessRange.Value) || !double.IsFinite(threshold.Value))
+            {
+                return null;
+            }
+
+            return new LoudnessNormalizationMeasurements(integrated.Value, truePeak.Value,
+                loudnessRange.Value, threshold.Value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool AreValidNormalizationTargets(double integratedLufs, double truePeakDbtp) =>
+        double.IsFinite(integratedLufs) && integratedLufs >= MinimumTargetIntegratedLufs &&
+        integratedLufs <= MaximumTargetIntegratedLufs && double.IsFinite(truePeakDbtp) &&
+        truePeakDbtp >= MinimumTargetTruePeakDbtp && truePeakDbtp <= MaximumTargetTruePeakDbtp;
+
+    private static double GetFilterTruePeakTarget(double requestedTruePeakDbtp) =>
+        requestedTruePeakDbtp - LossyEncodingTruePeakHeadroomDb;
+
+    private static string FormatMetric(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
     private static string BuildVideoFilter(EncodeRequest request, double? trimTargetSeconds)
     {
         var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile);
-        var filter = $"scale={options.Width}:{options.Height},setsar=1";
+        var filter = $"scale={options.Width}:{options.Height}:force_original_aspect_ratio=decrease," +
+            $"pad={options.Width}:{options.Height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1";
         if (trimTargetSeconds.HasValue)
         {
             var fadeStart = trimTargetSeconds.Value - ShortsPolicy.FadeSeconds;
@@ -520,6 +941,79 @@ public static class EncodingService
             : null;
     }
 
+    private static async Task<bool> IsEncodedDurationWithinLimitAsync(string path, string? ffmpegPath, int limit)
+    {
+        var ffprobePath = ResolveFfprobePath(ffmpegPath);
+        if (ffprobePath == null) return false;
+        using var document = await RunFfprobeJsonAsync(ffprobePath, new[]
+        {
+            "-v", "error", "-show_entries", "format=start_time,duration,end_time:stream=codec_type,start_time,duration,end_time",
+            "-of", "json", path
+        });
+        return document != null && IsShortsOutputWithinLimit(document.RootElement, limit);
+    }
+
+    private static bool IsShortsOutputWithinLimit(JsonElement root, int limit)
+    {
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("format", out var format) ||
+            !TryGetActualEndTime(format, out var containerEnd) || containerEnd > limit ||
+            !root.TryGetProperty("streams", out var streams) || streams.ValueKind != JsonValueKind.Array)
+            return false;
+        var hasVideo = false;
+        var hasAudio = false;
+        foreach (var stream in streams.EnumerateArray())
+        {
+            if (stream.ValueKind != JsonValueKind.Object ||
+                !stream.TryGetProperty("codec_type", out var codec) || codec.ValueKind != JsonValueKind.String)
+                return false;
+            var codecType = codec.GetString();
+            if (codecType is not ("video" or "audio")) continue;
+            if (!TryGetActualEndTime(stream, out var streamEnd) || streamEnd > limit) return false;
+            if (codecType == "video") hasVideo = true;
+            if (codecType == "audio") hasAudio = true;
+        }
+        return hasVideo && hasAudio;
+    }
+
+    private static bool TryGetActualEndTime(JsonElement element, out double endTime)
+    {
+        endTime = 0;
+        if (element.ValueKind != JsonValueKind.Object) return false;
+        var hasEnd = element.TryGetProperty("end_time", out var endElement);
+        var hasStart = element.TryGetProperty("start_time", out var startElement);
+        var hasDuration = element.TryGetProperty("duration", out var durationElement);
+        if (!hasEnd && (!hasStart || !hasDuration)) return false;
+
+        if (hasEnd)
+        {
+            if (!TryReadFiniteTime(endElement, out endTime) || endTime <= 0) return false;
+        }
+
+        if (hasStart && hasDuration)
+        {
+            if (!TryReadFiniteTime(startElement, out var start) ||
+                !TryReadFiniteTime(durationElement, out var duration) || duration <= 0 ||
+                !double.IsFinite(start + duration) || start + duration <= 0)
+                return false;
+            endTime = Math.Max(endTime, start + duration);
+        }
+
+        return endTime > 0;
+    }
+
+    private static bool TryReadFiniteTime(JsonElement element, out double time)
+    {
+        var text = element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.GetRawText(),
+            _ => null
+        };
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out time) &&
+            double.IsFinite(time);
+    }
+
     private static async Task<double?> ResolveShortsTrimTargetSecondsAsync(
         EncodeRequest request,
         StreamWriter logWriter,
@@ -792,7 +1286,7 @@ public static class EncodingService
 
     private static string FormatSeconds(double seconds)
     {
-        return seconds.ToString("0.###", CultureInfo.InvariantCulture);
+        return seconds.ToString("R", CultureInfo.InvariantCulture);
     }
 
     private static void AddVideoEncoderArgs(ProcessStartInfo psi, VideoEncoder encoder, EncodeRequest request)

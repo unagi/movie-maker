@@ -1,0 +1,38 @@
+<Window x:Class="MovieMaker.Views.TextOverlayJsonWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="曲名文字入れ JSON" Width="1100" Height="780" MinWidth="820" MinHeight="600"
+        ResizeMode="CanResize" WindowStartupLocation="CenterOwner" Background="#F3F4F6">
+  <Grid Margin="18">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <StackPanel>
+      <TextBlock Text="曲名文字入れの配置" FontSize="20" FontWeight="SemiBold" Foreground="#111827"/>
+      <TextBlock Text="JSON設定を貼り付けてください。各音声ファイル名（拡張子を除く）を、指定したゾーンへ描画します。設定は次回以降も使えるよう保存されます。"
+                 TextWrapping="Wrap" Foreground="#4B5563" Margin="0,6,0,0"/>
+    </StackPanel>
+    <TextBlock Grid.Row="1" Text="JSON（schemaVersion / canvas / zones を含む設定データ）"
+               FontWeight="SemiBold" Foreground="#374151" Margin="0,16,0,8"/>
+    <TextBox x:Name="JsonTextBox" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True"
+             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+             TextWrapping="NoWrap" FontFamily="Consolas" FontSize="13" Padding="12"
+             SpellCheck.IsEnabled="False" BorderBrush="#CBD5E1" BorderThickness="1"
+             Background="White" TextChanged="JsonTextBox_OnTextChanged"/>
+    <Grid Grid.Row="3" Margin="0,12,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock x:Name="ValidationText" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,12,0"/>
+      <Button Grid.Column="1" Content="キャンセル" MinWidth="100" Padding="14,8" Margin="0,0,8,0"
+              IsCancel="True"/>
+      <Button x:Name="ApplyButton" Grid.Column="2" Content="保存" MinWidth="100" Padding="14,8"
+              IsDefault="True" Click="ApplyButton_OnClick"/>
+    </Grid>
+  </Grid>
+</Window>

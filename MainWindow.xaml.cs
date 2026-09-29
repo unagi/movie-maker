@@ -11,6 +11,7 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using Point = System.Windows.Point;
 using MovieMaker.Models;
 using MovieMaker.ViewModels;
+using MovieMaker.Views;
 
 namespace MovieMaker;
 
@@ -26,6 +27,30 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = new MainViewModel();
+    }
+
+    private void EditTrackNormalization_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { DataContext: AudioTrackItem track } button ||
+            DataContext is not MainViewModel { IsEncoding: false })
+        {
+            return;
+        }
+
+        new TrackNormalizationWindow(track) { Owner = this }.ShowDialog();
+        button.Focus();
+    }
+
+    private void AudioReviewDetails_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { DataContext: AudioTrackItem track } button ||
+            string.IsNullOrWhiteSpace(track.AudioReviewDetailText))
+        {
+            return;
+        }
+
+        System.Windows.MessageBox.Show(this, track.AudioReviewDetailText, "入力音声の確認", MessageBoxButton.OK, MessageBoxImage.Information);
+        button.Focus();
     }
 
     private void DropArea_OnDragEnter(object sender, DragEventArgs e)

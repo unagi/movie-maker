@@ -73,10 +73,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         OpenSettingsCommand = new RelayCommand(_ => OpenSettings());
         OpenLoudnessAnalysisCommand = new RelayCommand(_ => OpenLoudnessAnalysis());
+        OpenTextOverlayEditorCommand = new RelayCommand(_ => OpenTextOverlayEditor(), _ => !IsEncoding);
         OpenOutputFolderCommand = new RelayCommand(_ => OpenFolder(OutputDirectoryPath), _ => Directory.Exists(OutputDirectoryPath));
         OpenArchiveFolderCommand = new RelayCommand(_ => OpenFolder(ArchiveDirectoryPath), _ => Directory.Exists(ArchiveDirectoryPath));
         ClearInputsCommand = new RelayCommand(_ => ClearInputs(), _ => CanClearInputs);
+        RemoveImageCommand = new RelayCommand(_ => RemoveImage(), _ => !IsEncoding && _imagePath != null);
         RemoveAudioTrackCommand = new RelayCommand(RemoveAudioTrack, track => !IsEncoding && track is AudioTrackItem);
+        ExportAudioTrackListCommand = new RelayCommand(_ => ExportAudioTrackList(), _ => !IsEncoding && AudioTracks.Count > 0);
         EncodeCommand = new AsyncRelayCommand(EncodeAsync, () => CanEncode);
 
         UpdateSettingsLabels();
@@ -85,10 +88,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public RelayCommand OpenSettingsCommand { get; }
     public RelayCommand OpenLoudnessAnalysisCommand { get; }
+    public RelayCommand OpenTextOverlayEditorCommand { get; }
     public RelayCommand OpenOutputFolderCommand { get; }
     public RelayCommand OpenArchiveFolderCommand { get; }
     public RelayCommand ClearInputsCommand { get; }
+    public RelayCommand RemoveImageCommand { get; }
     public RelayCommand RemoveAudioTrackCommand { get; }
+    public RelayCommand ExportAudioTrackListCommand { get; }
     public AsyncRelayCommand EncodeCommand { get; }
     public ObservableCollection<AudioTrackItem> AudioTracks { get; } = [];
 
@@ -125,6 +131,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         get
         {
+            if (IsStandardProfile)
+            {
+                return null;
+            }
+
             if (SelectedProfile != EncodeProfile.DraftPreview)
             {
                 return ImagePreview;
@@ -152,9 +163,46 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public string DropActionText => SelectedProfile == EncodeProfile.DraftPreview
-        ? "音声を末尾へ追加"
-        : "画像を置き換え・音声を末尾へ追加";
+    public string DropActionText => UseDraftMode ? "音声を末尾へ追加" : "画像を置き換え・音声を末尾へ追加";
+    public string DropHeaderText => UseDraftMode ? "音声ファイル・音声フォルダをドロップ" : "画像・音声ファイル・音声フォルダをドロップ";
+    public string InputSectionHeader => "入力とプレビュー";
+    public OutputClassification OutputClassification => OutputClassificationService.Classify(
+        _imageWidth, _imageHeight, AudioTracks.Count, _audioDurationSeconds,
+        SettingsService.Current.ShortsMaximumSeconds,
+        AudioTracks.Any(track => track.IsDurationAnalysisFailed));
+    private bool HasBlockingSettingsLoadError => SettingsService.LoadError != null &&
+        (!UseDraftMode || ShortsPolicy.AreSettingsValid(SettingsService.Current));
+    public string InputStateMessage => (HasBlockingSettingsLoadError ? SettingsService.LoadError : null) ??
+        (UseDraftMode ? "仮動画" :
+            !ShortsPolicy.AreSettingsValid(SettingsService.Current) ? "Shorts上限・オフセット設定を修正してください" :
+            OutputClassification.Message);
+    public bool IsInputError => HasBlockingSettingsLoadError ||
+        !UseDraftMode && !ShortsPolicy.AreSettingsValid(SettingsService.Current) ||
+        !UseDraftMode && OutputClassification.Kind == OutputKind.InputError;
+    public bool HasNormalLengthWarning => !UseDraftMode && OutputClassification.HasNormalLengthWarning;
+    public bool IsNormalOutput => !UseDraftMode && OutputClassification.Kind == OutputKind.Normal;
+    public bool NormalTextOverlayEnabled
+    {
+        get => SettingsService.Current.NormalTextOverlayEnabled;
+        set
+        {
+            if (SettingsService.Current.NormalTextOverlayEnabled == value) return;
+            if (SettingsService.LoadError != null)
+            {
+                StatusMessage = SettingsService.LoadError;
+                OnPropertyChanged();
+                return;
+            }
+            SettingsService.Current.NormalTextOverlayEnabled = value;
+            SettingsService.Save(SettingsService.Current);
+            OnPropertyChanged();
+            UpdateValidation(true);
+        }
+    }
+    public string TextOverlayLayoutStatusText =>
+        TextOverlayService.TryParse(SettingsService.Current.TextOverlayLayoutJson, out _, out _)
+            ? "設定済み"
+            : "未設定";
 
     public bool HasNoAudioTracks => AudioTracks.Count == 0;
 
@@ -176,37 +224,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool HasAudioLoudnessWarning => AudioTracks.Any(track =>
         track.IsLoudnessWarning || track.IsTruePeakWarning);
 
-    public string AudioLoudnessSummaryText
-    {
-        get
-        {
-            if (!IsAudioReady)
-            {
-                return string.Empty;
-            }
-
-            var warnings = AudioTracks
-                .Where(track => track.IsLoudnessWarning || track.IsTruePeakWarning)
-                .Select(track => $"{track.FileName}: {track.LoudnessText} / {track.TruePeakText}")
-                .ToArray();
-            if (warnings.Length > 0)
-            {
-                return $"音量警告: {string.Join(" / ", warnings)}";
-            }
-
-            if (AudioTracks.Any(track => !track.IsLoudnessAnalysisComplete))
-            {
-                return "音量解析中...";
-            }
-
-            if (AudioTracks.Any(track => !track.IsLoudnessAnalysisAvailable))
-            {
-                return "音量を解析できないファイルがあります";
-            }
-
-            return "音量: LUFS / True Peakともに警告なし";
-        }
-    }
+    public string AudioLoudnessGuidanceText => SelectedProfile == EncodeProfile.Standard
+        ? "通常動画は出力時に各曲を目標値へ調整します。"
+        : "仮動画・Shortsは音量調整なしで出力します。";
 
     public string ImageFileLabel
     {
@@ -310,6 +330,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 IsFileDragOver = false;
             }
             RemoveAudioTrackCommand.RaiseCanExecuteChanged();
+            ExportAudioTrackListCommand.RaiseCanExecuteChanged();
+            OpenTextOverlayEditorCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -340,11 +362,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public EncodeProfile SelectedProfile
     {
-        get => _selectedProfile;
+        get => _selectedProfile == EncodeProfile.DraftPreview ? EncodeProfile.DraftPreview :
+            _imageWidth > 0 && _imageHeight > _imageWidth ? EncodeProfile.CopyrightCheckProduction : EncodeProfile.Standard;
         set
         {
-            if (_selectedProfile == value) return;
-            _selectedProfile = value;
+            var requested = value == EncodeProfile.DraftPreview ? EncodeProfile.DraftPreview : EncodeProfile.Standard;
+            if (_selectedProfile == requested) return;
+            _selectedProfile = requested;
             OnPropertyChanged();
             OnPropertyChanged(nameof(UseDraftMode));
             OnPropertyChanged(nameof(IsStandardProfile));
@@ -358,6 +382,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(EffectiveImageBadgeText));
             OnPropertyChanged(nameof(EffectiveImageCaption));
             OnPropertyChanged(nameof(DropActionText));
+            OnPropertyChanged(nameof(DropHeaderText));
+            OnPropertyChanged(nameof(InputSectionHeader));
             NotifyStatusChanged();
             UpdateValidation(true);
         }
@@ -381,7 +407,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public bool IsStandardProfile
     {
-        get => SelectedProfile == EncodeProfile.Standard;
+        get => IsNormalOutput;
         set
         {
             if (value)
@@ -498,9 +524,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool ShowReplaceImageHint => SelectedProfile != EncodeProfile.DraftPreview && IsImageReady;
+    public bool ShowReplaceImageHint => !UseDraftMode && IsImageReady;
 
-    public bool IsImageReady => SelectedProfile == EncodeProfile.DraftPreview || !string.IsNullOrWhiteSpace(_imagePath);
+    public bool IsImageReady => SelectedProfile == EncodeProfile.DraftPreview ||
+        !string.IsNullOrWhiteSpace(_imagePath) && File.Exists(_imagePath);
+    public bool IsBackgroundAspectWarning => _imageWidth > 0 && _imageHeight > 0 &&
+        !IsRatioClose((double)_imageWidth / _imageHeight,
+            _imageHeight > _imageWidth ? VerticalRatio : HorizontalRatio);
     public string ImageStatusText
     {
         get
@@ -508,6 +538,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             if (SelectedProfile == EncodeProfile.DraftPreview)
             {
                 return "仮画像を生成 (横 960x540)";
+            }
+
+            if (IsNormalOutput)
+            {
+                if (!IsImageReady) return "未設定（背景画像をドロップ）";
+                return IsBackgroundAspectWarning
+                    ? $"{Path.GetFileName(_imagePath)} ({_imageWidth}x{_imageHeight}) — 16:9以外・黒帯あり"
+                    : $"{Path.GetFileName(_imagePath)} ({_imageWidth}x{_imageHeight})";
             }
 
             if (!IsImageReady)
@@ -518,7 +556,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var name = Path.GetFileName(_imagePath!);
             if (_imageWidth > 0 && _imageHeight > 0)
             {
-                return $"{name} ({_imageWidth}x{_imageHeight})";
+                return IsBackgroundAspectWarning
+                    ? $"{name} ({_imageWidth}x{_imageHeight}) — 9:16以外・黒帯あり"
+                    : $"{name} ({_imageWidth}x{_imageHeight})";
             }
 
             return name;
@@ -549,13 +589,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool IsOutputReady => SelectedProfile == EncodeProfile.DraftPreview || _aspectValid;
+    public bool IsOutputReady => UseDraftMode || OutputClassification.CanEncodeInputs;
     public string OutputStatusText
     {
         get
         {
             var orientation = GetEffectiveOrientation();
-            if (orientation == null || (SelectedProfile != EncodeProfile.DraftPreview && !_aspectValid))
+            if (orientation == null)
             {
                 return "未判定";
             }
@@ -567,7 +607,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
 
             var duration = _audioDurationSeconds.Value;
-            if (orientation == VideoOrientation.Vertical &&
+            if (orientation == VideoOrientation.Vertical && duration <= SettingsService.Current.ShortsMaximumSeconds &&
                 ShortsPolicy.TryGetTrimTargetSeconds(duration, out var targetSeconds))
             {
                 duration = targetSeconds;
@@ -587,12 +627,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 $"モード: {GetProfileDescription(GetSelectedProfile())}",
                 string.Empty,
                 "映像",
-                $"・ソース: {(SelectedProfile == EncodeProfile.DraftPreview ? "仮画像を自動生成" : "入力画像を使用")}",
+                $"・ソース: {(UseDraftMode ? "仮画像を自動生成" : IsNormalOutput && NormalTextOverlayEnabled ? "背景画像にトラック名を文字入れ" : "入力画像を使用")}",
                 $"・出力解像度: {GetTargetResolutionText()}",
                 $"・向き判定: {GetOrientationText()}",
                 $"・フレームレート: {options.FrameRate} fps",
                 "・ピクセル形式: yuv420p",
-                "・アスペクト処理: scale + setsar=1",
+                "・アスペクト処理: 比率維持のscale + 黒帯 + setsar=1",
                 "・映像エンコーダ: NVENC/QSV/AMF優先、非対応時はlibx264",
                 string.Empty,
                 "音声",
@@ -603,6 +643,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 string.Empty,
                 "出力制御"
             };
+
+            if (IsNormalOutput)
+            {
+                var settings = SettingsService.Current;
+                var overrideCount = AudioTracks.Count(track => track.IsNormalizationOverrideEnabled);
+                lines.Insert(lines.IndexOf("出力制御"),
+                    $"・ノーマライズ: 既定 {settings.NormalizationTargetIntegratedLufs:0.###} LUFS / " +
+                    $"{settings.NormalizationTargetTruePeakDbtp:0.###} dBTP、個別上書き {overrideCount}件（AAC変換用に1 dB余裕）");
+            }
 
             if ((GetEffectiveOrientation() ?? DraftOrientation) == VideoOrientation.Vertical)
             {
@@ -725,7 +774,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var messages = new List<string>();
         if (imageReplaced)
         {
-            messages.Add($"画像を{Path.GetFileName(imageFiles[0])}に置き換えました");
+            messages.Add(SelectedProfile == EncodeProfile.Standard
+                ? $"背景画像を{Path.GetFileName(imageFiles[0])}に設定しました"
+                : $"画像を{Path.GetFileName(imageFiles[0])}に置き換えました");
+            if (SelectedProfile == EncodeProfile.Standard && IsBackgroundAspectWarning)
+            {
+                messages.Add("背景画像は16:9ではないため、余白に黒帯が付きます");
+            }
         }
         else if (imageLoadFailed)
         {
@@ -733,7 +788,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         else if (multipleImagesRejected)
         {
-            messages.Add("画像は1件ずつドロップしてください");
+            messages.Add(SelectedProfile == EncodeProfile.Standard
+                ? "通常モードの背景画像は1枚です。画像は1件ずつドロップしてください"
+                : "画像は1件ずつドロップしてください");
         }
 
         if (draftImagesIgnored > 0)
@@ -805,7 +862,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var existingPaths = new HashSet<string>(AudioTracks.Select(track => track.Path), StringComparer.OrdinalIgnoreCase);
         var addedCount = 0;
         var duplicateCount = 0;
-        _audioDurationSeconds = null;
+        // Duplicate drops must not discard durations already analyzed.
 
         foreach (var path in paths.Where(File.Exists))
         {
@@ -815,9 +872,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 continue;
             }
 
-            var track = new AudioTrackItem(path);
+            var track = new AudioTrackItem(path, SettingsService.Current.NormalizationTargetIntegratedLufs,
+                SettingsService.Current.NormalizationTargetTruePeakDbtp);
+            track.PropertyChanged += AudioTrack_PropertyChanged;
             AudioTracks.Add(track);
+            ExportAudioTrackListCommand.RaiseCanExecuteChanged();
             addedCount++;
+            _audioDurationSeconds = null;
             _ = UpdateAudioTrackInfoAsync(track);
         }
 
@@ -834,6 +895,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
+        track.PropertyChanged -= AudioTrack_PropertyChanged;
+        ExportAudioTrackListCommand.RaiseCanExecuteChanged();
         RecalculateAudioDuration();
         UpdateAudioTrackPositions();
         UpdateAudioFileLabel();
@@ -853,7 +916,83 @@ public sealed class MainViewModel : INotifyPropertyChanged
         AudioTracks.Move(oldIndex, newIndex);
         UpdateAudioTrackPositions();
         NotifyStatusChanged();
+        UpdateValidation(false);
         StatusMessage = $"音声トラックを{oldIndex + 1}番目から{newIndex + 1}番目へ移動しました";
+    }
+
+    private void AudioTrack_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(AudioTrackItem.IsNormalizationOverrideEnabled) or
+            nameof(AudioTrackItem.NormalizationTargetLufsText) or nameof(AudioTrackItem.NormalizationTargetTruePeakText))
+        {
+            OnPropertyChanged(nameof(EncodingSettingsText));
+            UpdateValidation(true);
+        }
+    }
+
+    private void ExportAudioTrackList()
+    {
+        var tracksWithoutDuration = AudioTracks.Where(track => track.DurationSeconds is not > 0).ToArray();
+        if (tracksWithoutDuration.Length > 0)
+        {
+            StatusMessage = tracksWithoutDuration.Any(track => track.InfoText == "解析中...")
+                ? "再生時刻を取得中です。音声解析が終わってから書き出してください"
+                : $"再生時刻を取得できないトラックがあります: {tracksWithoutDuration[0].FileName}";
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "YouTubeチャプター一覧を保存",
+            FileName = "YouTubeチャプター.txt",
+            DefaultExt = ".txt",
+            AddExtension = true,
+            Filter = "テキストファイル (*.txt)|*.txt"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var lines = new List<string>(AudioTracks.Count);
+            var elapsedSeconds = 0.0;
+            for (var index = 0; index < AudioTracks.Count; index++)
+            {
+                var track = AudioTracks[index];
+                lines.Add($"{FormatChapterTimestamp(elapsedSeconds)} {index + 1}.{Path.GetFileNameWithoutExtension(track.FileName)}");
+                elapsedSeconds += track.DurationSeconds!.Value;
+            }
+
+            File.WriteAllLines(dialog.FileName, lines, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            var chapterWarnings = new List<string>();
+            if (AudioTracks.Count < 3)
+            {
+                chapterWarnings.Add("YouTubeのチャプター表示には3件以上必要です");
+            }
+            if (AudioTracks.Any(track => track.DurationSeconds is < 10))
+            {
+                chapterWarnings.Add("10秒未満のトラックがありチャプターとして認識されない場合があります");
+            }
+
+            StatusMessage = chapterWarnings.Count > 0
+                ? $"チャプター一覧を書き出しました（{string.Join(" / ", chapterWarnings)}）: {dialog.FileName}"
+                : $"チャプター一覧を書き出しました: {dialog.FileName}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"チャプター一覧を書き出せませんでした: {ex.Message}";
+        }
+    }
+
+    private static string FormatChapterTimestamp(double elapsedSeconds)
+    {
+        var totalSeconds = (long)Math.Floor(elapsedSeconds);
+        var hours = totalSeconds / 3600;
+        var minutes = totalSeconds % 3600 / 60;
+        var seconds = totalSeconds % 60;
+        return $"{hours:00}:{minutes:00}:{seconds:00}";
     }
 
     private void UpdateAudioFileLabel()
@@ -887,12 +1026,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         _imagePath = null;
+        foreach (var track in AudioTracks)
+        {
+            track.PropertyChanged -= AudioTrack_PropertyChanged;
+        }
         AudioTracks.Clear();
+        ExportAudioTrackListCommand.RaiseCanExecuteChanged();
         _audioDurationSeconds = null;
         _imageWidth = 0;
         _imageHeight = 0;
         _orientation = null;
         _aspectValid = false;
+        OnPropertyChanged(nameof(EncodingSettingsText));
 
         ImagePreview = null;
         ImageFileLabel = "画像: 未設定";
@@ -901,6 +1046,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         AspectLabel = "比率: 未判定";
 
         NotifyStatusChanged();
+        UpdateValidation(true);
+    }
+
+    private void RemoveImage()
+    {
+        if (IsEncoding || _imagePath == null) return;
+        _imagePath = null;
+        _imageWidth = 0;
+        _imageHeight = 0;
+        ImagePreview = null;
+        ImageFileLabel = "画像: 未設定";
+        UpdateAspectInfo();
         UpdateValidation(true);
     }
 
@@ -917,27 +1074,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         var ratio = (double)_imageWidth / _imageHeight;
-        var isVertical = IsRatioClose(ratio, VerticalRatio);
-        var isHorizontal = IsRatioClose(ratio, HorizontalRatio);
+        var isVertical = _imageHeight > _imageWidth;
+        var isHorizontal = !isVertical;
 
-        _aspectValid = isVertical || isHorizontal;
+        _aspectValid = IsRatioClose(ratio, isVertical ? VerticalRatio : HorizontalRatio);
         if (isVertical)
         {
             _orientation = VideoOrientation.Vertical;
-            OrientationLabel = "向き: 縦 (9:16)";
-            AspectLabel = $"比率: {ratio:F3} (9:16)";
+            OrientationLabel = "向き: 縦 (Shorts)";
+            AspectLabel = _aspectValid ? $"比率: {ratio:F3} (9:16)" : $"比率: {ratio:F3} (黒帯あり)";
         }
         else if (isHorizontal)
         {
             _orientation = VideoOrientation.Horizontal;
-            OrientationLabel = "向き: 横 (16:9)";
-            AspectLabel = $"比率: {ratio:F3} (16:9)";
-        }
-        else
-        {
-            _orientation = null;
-            OrientationLabel = "向き: 未判定";
-            AspectLabel = $"比率: {ratio:F3} (9:16/16:9以外)";
+            OrientationLabel = "向き: 横 (通常動画)";
+            AspectLabel = _aspectValid ? $"比率: {ratio:F3} (16:9)" : $"比率: {ratio:F3} (黒帯あり)";
         }
         NotifyStatusChanged();
     }
@@ -992,17 +1143,31 @@ public sealed class MainViewModel : INotifyPropertyChanged
             errors.Add("アーカイブディレクトリが未設定です");
         }
 
-        if (string.IsNullOrWhiteSpace(_imagePath))
+        if (!UseDraftMode)
         {
-            if (SelectedProfile != EncodeProfile.DraftPreview)
+            if (string.IsNullOrWhiteSpace(_imagePath) || !File.Exists(_imagePath))
             {
                 errors.Add("画像が未設定です");
             }
+            if (!OutputClassification.CanEncodeInputs)
+            {
+                errors.Add(OutputClassification.Message);
+            }
+            if (IsNormalOutput && NormalTextOverlayEnabled &&
+                !TextOverlayService.TryParse(SettingsService.Current.TextOverlayLayoutJson, out _, out var overlayError))
+            {
+                errors.Add(string.IsNullOrWhiteSpace(SettingsService.Current.TextOverlayLayoutJson)
+                    ? "文字入れJSONを設定してください"
+                    : $"文字入れJSONを確認してください: {overlayError}");
+            }
+            if (IsNormalOutput && AudioTracks.Any(track => !track.NormalizationTargetsValid))
+            {
+                errors.Add("音声トラックのノーマライズ目標値を確認してください");
+            }
         }
-        else if (SelectedProfile != EncodeProfile.DraftPreview && !_aspectValid)
-        {
-            errors.Add("画像の比率が9:16または16:9ではありません");
-        }
+
+        if (HasBlockingSettingsLoadError || !UseDraftMode && !ShortsPolicy.AreSettingsValid(SettingsService.Current))
+            errors.Add(SettingsService.LoadError ?? "Shorts上限・オフセット設定を修正してください");
 
         if (AudioTracks.Count == 0)
         {
@@ -1038,21 +1203,53 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void NotifyStatusChanged()
     {
         OnPropertyChanged(nameof(IsImageReady));
+        OnPropertyChanged(nameof(IsBackgroundAspectWarning));
         OnPropertyChanged(nameof(ImageStatusText));
         OnPropertyChanged(nameof(ShowReplaceImageHint));
+        OnPropertyChanged(nameof(TextOverlayLayoutStatusText));
         OnPropertyChanged(nameof(IsAudioReady));
         OnPropertyChanged(nameof(AudioStatusText));
         OnPropertyChanged(nameof(AudioQueueSummaryText));
-        OnPropertyChanged(nameof(AudioLoudnessSummaryText));
         OnPropertyChanged(nameof(HasAudioLoudnessWarning));
+        OnPropertyChanged(nameof(AudioLoudnessGuidanceText));
         OnPropertyChanged(nameof(HasNoAudioTracks));
         OnPropertyChanged(nameof(IsOutputReady));
+        OnPropertyChanged(nameof(SelectedProfile));
+        OnPropertyChanged(nameof(IsCopyrightCheckProductionProfile));
+        OnPropertyChanged(nameof(OutputClassification));
+        OnPropertyChanged(nameof(InputStateMessage));
+        OnPropertyChanged(nameof(IsInputError));
+        OnPropertyChanged(nameof(HasNormalLengthWarning));
+        OnPropertyChanged(nameof(IsNormalOutput));
+        OnPropertyChanged(nameof(IsStandardProfile));
         OnPropertyChanged(nameof(OutputStatusText));
         OnPropertyChanged(nameof(EncodingSettingsText));
         OnPropertyChanged(nameof(CanClearInputs));
         OnPropertyChanged(nameof(EffectiveImagePreview));
         OnPropertyChanged(nameof(EffectiveImageBadgeText));
         OnPropertyChanged(nameof(EffectiveImageCaption));
+    }
+
+    private static bool TryParseTrackNormalizationTargets(AudioTrackItem track, out double targetLufs, out double targetTruePeak)
+    {
+        targetLufs = 0;
+        targetTruePeak = 0;
+        var lufsText = track.IsNormalizationOverrideEnabled ? track.NormalizationTargetLufsText :
+            SettingsService.Current.NormalizationTargetIntegratedLufs.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        var peakText = track.IsNormalizationOverrideEnabled ? track.NormalizationTargetTruePeakText :
+            SettingsService.Current.NormalizationTargetTruePeakDbtp.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        if (!double.TryParse(lufsText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out targetLufs) ||
+            !double.TryParse(peakText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out targetTruePeak))
+        {
+            return false;
+        }
+
+        return double.IsFinite(targetLufs) && targetLufs >= EncodingService.MinimumTargetIntegratedLufs &&
+               targetLufs <= EncodingService.MaximumTargetIntegratedLufs && double.IsFinite(targetTruePeak) &&
+               targetTruePeak >= EncodingService.MinimumTargetTruePeakDbtp &&
+               targetTruePeak <= EncodingService.MaximumTargetTruePeakDbtp;
     }
 
     private void RefreshDraftImagePreview()
@@ -1083,7 +1280,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private VideoOrientation? GetEffectiveOrientation()
     {
-        return SelectedProfile == EncodeProfile.DraftPreview ? VideoOrientation.Horizontal : _orientation;
+        return UseDraftMode ? VideoOrientation.Horizontal : _orientation;
     }
 
     private EncodeProfile GetSelectedProfile()
@@ -1115,7 +1312,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string GetOutputModeLabel(VideoOrientation orientation)
     {
         var baseLabel = orientation == VideoOrientation.Vertical ? "YouTube Short" : "YouTube";
-        return SelectedProfile switch
+        return GetSelectedProfile() switch
         {
             EncodeProfile.CopyrightCheckProduction => $"本番画質・軽量音声 ({baseLabel})",
             EncodeProfile.DraftPreview => $"仮動画 ({baseLabel})",
@@ -1148,7 +1345,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch
         {
-            // Individual analysis failures are displayed as unavailable and do not block encoding.
+            // Duration analysis failures are surfaced by the input classifier.
         }
 
         if (!AudioTracks.Contains(track))
@@ -1163,16 +1360,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _ => FormatAudioInfo(info)
         };
         track.ApplyAnalysis(infoText, info?.DurationSeconds);
-        var isLoudnessWarning = loudness?.Status is AudioLoudnessStatus.TooQuiet or AudioLoudnessStatus.TooLoud;
-        track.ApplyLoudnessAnalysis(
-            $"音量: {FormatAudioLoudness(loudness)}",
-            isLoudnessWarning,
-            loudness != null,
-            $"True Peak: {FormatAudioTruePeak(loudness)}",
-            loudness?.TruePeakStatus is AudioTruePeakStatus.TooHigh,
-            $"LRA: {FormatAudioLoudnessRange(loudness)}");
+        track.ApplyLoudnessAnalysis(loudness?.IntegratedLufs, loudness?.TruePeakDbtp,
+            loudness?.LoudnessRangeLu);
         RecalculateAudioDuration();
         NotifyStatusChanged();
+        UpdateValidation(false);
     }
 
     private void RecalculateAudioDuration()
@@ -1238,12 +1430,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             ? "-∞"
             : loudness.IntegratedLufs.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 
-        return loudness.Status switch
-        {
-            AudioLoudnessStatus.TooQuiet => $"{value} LUFS（小さすぎます）",
-            AudioLoudnessStatus.TooLoud => $"{value} LUFS（大きすぎます）",
-            _ => $"{value} LUFS（適正）"
-        };
+        return $"{value} LUFS";
     }
 
     private static string FormatAudioTruePeak(AudioLoudnessResult? loudness)
@@ -1257,18 +1444,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             ? "-∞"
             : truePeakDbtp.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 
-        return loudness.TruePeakStatus switch
-        {
-            AudioTruePeakStatus.TooHigh => $"{value} dBTP（高すぎます）",
-            _ => $"{value} dBTP（適正）"
-        };
+        return $"{value} dBTP";
     }
 
     private static string FormatAudioLoudnessRange(AudioLoudnessResult? loudness)
     {
         return loudness?.LoudnessRangeLu is double loudnessRangeLu
             ? loudnessRangeLu.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " LU"
-            : "解析不可";
+            : "—";
     }
 
     private static string FormatDuration(double seconds)
@@ -1405,6 +1588,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var result = window.ShowDialog();
         if (result == true)
         {
+            foreach (var track in AudioTracks)
+            {
+                track.UpdateDefaultNormalizationTargets(SettingsService.Current.NormalizationTargetIntegratedLufs,
+                    SettingsService.Current.NormalizationTargetTruePeakDbtp);
+            }
+            OnPropertyChanged(nameof(EncodingSettingsText));
             UpdateSettingsLabels();
             UpdateValidation(true);
         }
@@ -1420,6 +1609,42 @@ public sealed class MainViewModel : INotifyPropertyChanged
         window.ShowDialog();
     }
 
+    private void OpenTextOverlayEditor()
+    {
+        if (SettingsService.LoadError != null)
+        {
+            StatusMessage = SettingsService.LoadError;
+            return;
+        }
+        var window = new TextOverlayJsonWindow(SettingsService.Current.TextOverlayLayoutJson)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+
+        if (window.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var current = SettingsService.Current;
+        SettingsService.Save(new AppSettings
+        {
+            OutputDirectory = current.OutputDirectory,
+            ArchiveDirectory = current.ArchiveDirectory,
+            OneMinuteShortsOffsetSeconds = current.OneMinuteShortsOffsetSeconds,
+            ThreeMinuteShortsOffsetSeconds = current.ThreeMinuteShortsOffsetSeconds,
+            ShortsMaximumSeconds = current.ShortsMaximumSeconds,
+            NormalTextOverlayEnabled = current.NormalTextOverlayEnabled,
+            NormalizationTargetIntegratedLufs = current.NormalizationTargetIntegratedLufs,
+            NormalizationTargetTruePeakDbtp = current.NormalizationTargetTruePeakDbtp,
+            TextOverlayLayoutJson = window.JsonText
+        });
+
+        OnPropertyChanged(nameof(TextOverlayLayoutStatusText));
+        UpdateValidation(true);
+        StatusMessage = "曲名文字入れのJSON設定を保存しました";
+    }
+
     private async Task EncodeAsync()
     {
         UpdateValidation(true);
@@ -1429,7 +1654,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         var orientation = GetEffectiveOrientation();
-        if (orientation == null || AudioTracks.Count == 0)
+        var profile = GetSelectedProfile();
+        var audioSnapshot = AudioTracks.ToArray();
+        var originalAudioPaths = audioSnapshot.Select(track => track.Path).ToArray();
+        var originalImagePath = _imagePath;
+        var settings = SettingsService.Current;
+        var overlayJson = settings.TextOverlayLayoutJson;
+        var overlayEnabled = profile == EncodeProfile.Standard && settings.NormalTextOverlayEnabled;
+        var maxSeconds = settings.ShortsMaximumSeconds;
+        var oneMinuteOffset = settings.OneMinuteShortsOffsetSeconds;
+        var threeMinuteOffset = settings.ThreeMinuteShortsOffsetSeconds;
+        var draftAudioQuality = _draftAudioQuality;
+        if (orientation == null || audioSnapshot.Length == 0)
         {
             StatusMessage = "入力が不足しています";
             return;
@@ -1442,8 +1678,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
+        string? generatedImageDirectory = null;
+        IReadOnlyList<string>? trackImagePaths = null;
         try
         {
+            var normalizationTargets = profile == EncodeProfile.Standard
+                ? audioSnapshot.Select(track =>
+                {
+                    if (!TryParseTrackNormalizationTargets(track, out var lufs, out var peak))
+                        throw new InvalidOperationException($"{track.FileName}: ノーマライズ目標値を確認してください");
+                    return new LoudnessNormalizationTarget(lufs, peak);
+                }).ToArray()
+                : null;
             IsEncoding = true;
             UpdateValidation(false);
             StatusMessage = "エンコード中...";
@@ -1451,8 +1697,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var title = Title.Trim();
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
 
-            var outputRoot = SettingsService.Current.OutputDirectory.Trim();
-            var archiveRoot = SettingsService.Current.ArchiveDirectory.Trim();
+            var outputRoot = settings.OutputDirectory.Trim();
+            var archiveRoot = settings.ArchiveDirectory.Trim();
 
             var archiveFolderName = ResolveArchiveFolderName(title, archiveRoot);
 
@@ -1462,14 +1708,41 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Directory.CreateDirectory(outputFolder);
             Directory.CreateDirectory(archiveFolder);
 
-            var imagePath = _imagePath;
-            if (SelectedProfile == EncodeProfile.DraftPreview)
+            var imagePath = originalImagePath;
+            if (profile == EncodeProfile.DraftPreview)
             {
                 imagePath = PlaceholderImageService.CreateDraftPlaceholder(archiveFolder, title, orientation.Value, DateTime.Now);
             }
-            else if (imagePath != null)
+            else if (originalImagePath != null)
             {
-                File.Copy(imagePath, Path.Combine(archiveFolder, Path.GetFileName(imagePath)), overwrite: false);
+                if (!File.Exists(originalImagePath))
+                {
+                    throw new InvalidOperationException("背景画像を確認してください。");
+                }
+                imagePath = Path.Combine(archiveFolder, "image-" + Path.GetFileName(originalImagePath));
+                File.Copy(originalImagePath, imagePath, overwrite: false);
+            }
+
+            var sourceImagePath = overlayEnabled ? imagePath : null;
+
+            if (overlayEnabled)
+            {
+                if (!TextOverlayService.TryParse(overlayJson,
+                        out var overlayConfiguration, out var overlayError) || overlayConfiguration == null)
+                {
+                    throw new InvalidOperationException(overlayError ?? "背景画像または文字入れJSONを確認してください。");
+                }
+                File.WriteAllText(Path.Combine(archiveFolder, "text-overlay-layout.json"), overlayJson);
+
+                generatedImageDirectory = Path.Combine(Path.GetTempPath(), "MovieMaker", Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(generatedImageDirectory);
+                var configuration = overlayConfiguration;
+                var backgroundImagePath = imagePath!;
+                var generatedDirectoryPath = generatedImageDirectory;
+                var trackTitles = originalAudioPaths.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+                trackImagePaths = await TextOverlayService.CreateTrackImagesAsync(backgroundImagePath,
+                    generatedDirectoryPath, trackTitles, configuration);
+                imagePath = trackImagePaths[0];
             }
 
             if (imagePath == null)
@@ -1478,34 +1751,44 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            foreach (var audioPath in AudioTracks.Select(track => track.Path))
+            var archivedAudioPaths = new List<string>(originalAudioPaths.Length);
+            for (var index = 0; index < originalAudioPaths.Length; index++)
             {
-                File.Copy(audioPath, Path.Combine(archiveFolder, Path.GetFileName(audioPath)), overwrite: false);
+                var archived = Path.Combine(archiveFolder, $"audio-{index:D2}-" + Path.GetFileName(originalAudioPaths[index]));
+                File.Copy(originalAudioPaths[index], archived, overwrite: false);
+                archivedAudioPaths.Add(archived);
             }
 
-            var outputFileName = OutputNamingService.BuildOutputFileName(title, timestamp, GetSelectedProfile());
+            var outputFileName = OutputNamingService.BuildOutputFileName(title, timestamp, profile);
             var outputPath = Path.Combine(outputFolder, outputFileName);
             var logPath = Path.Combine(EncodingService.GetLogDirectory(), $"{title}_{timestamp}.log");
-
             var request = new EncodeRequest(
                 ffmpegPath,
                 imagePath,
-                AudioTracks.Select(track => track.Path).ToArray(),
+                archivedAudioPaths,
                 outputPath,
                 orientation.Value,
-                GetSelectedProfile(),
+                profile,
                 logPath,
-                _draftAudioQuality);
+                draftAudioQuality,
+                trackImagePaths,
+                normalizationTargets,
+                maxSeconds,
+                overlayEnabled,
+                oneMinuteOffset,
+                threeMinuteOffset,
+                SourceImagePath: sourceImagePath);
 
             var result = await EncodingService.EncodeAsync(request);
 
             if (result.Success)
             {
                 var outputLoudness = await EncodingService.GetAudioLoudnessAsync(result.OutputPath, ffmpegPath);
-                var loudnessText =
-                    $"{FormatAudioLoudness(outputLoudness)} / " +
-                    $"TP: {FormatAudioTruePeak(outputLoudness)} / " +
-                    $"LRA: {FormatAudioLoudnessRange(outputLoudness)}";
+                var loudnessText = outputLoudness is null
+                    ? "解析不可"
+                    : $"{FormatAudioLoudness(outputLoudness)} / " +
+                      $"TP {FormatAudioTruePeak(outputLoudness)} / " +
+                      $"LRA {FormatAudioLoudnessRange(outputLoudness)}";
                 StatusMessage = string.IsNullOrWhiteSpace(result.Encoder)
                     ? $"完了: {result.OutputPath} / 出力音声: {loudnessText}"
                     : $"完了: {result.OutputPath} (Encoder: {result.Encoder}) / 出力音声: {loudnessText}";
@@ -1521,6 +1804,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         finally
         {
+            if (!string.IsNullOrWhiteSpace(generatedImageDirectory))
+            {
+                try
+                {
+                    Directory.Delete(generatedImageDirectory, recursive: true);
+                }
+                catch
+                {
+                    // The encoded video is complete; temporary image cleanup is best effort.
+                }
+            }
             IsEncoding = false;
             UpdateValidation(false);
         }

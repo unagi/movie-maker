@@ -24,6 +24,7 @@
     <SolidColorBrush x:Key="AppBlue" Color="#1977F3"/>
     <SolidColorBrush x:Key="AppBlueSoft" Color="#E8F0FE"/>
     <SolidColorBrush x:Key="DangerForeground" Color="#D92D20"/>
+    <SolidColorBrush x:Key="WarningForeground" Color="#B54708"/>
     <SolidColorBrush x:Key="SuccessForeground" Color="#027A48"/>
 
     <Style x:Key="CardStyle" TargetType="Border">
@@ -49,6 +50,7 @@
             <Border Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}"
                     CornerRadius="10">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
@@ -72,12 +74,19 @@
             <Border Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}"
                     CornerRadius="8">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
+    </Style>
+
+    <Style x:Key="InlineButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+      <Setter Property="MinHeight" Value="28"/>
+      <Setter Property="Padding" Value="6,2"/>
+      <Setter Property="FontSize" Value="11"/>
     </Style>
 
     <Style x:Key="TitleBarButton" TargetType="Button">
@@ -289,7 +298,7 @@
                                   <Setter Property="Foreground" Value="{StaticResource SuccessForeground}"/>
                                   <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsWarning}" Value="True">
-                                      <Setter Property="Foreground" Value="{StaticResource DangerForeground}"/>
+                                      <Setter Property="Foreground" Value="{StaticResource WarningForeground}"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsAnalysisAvailable}" Value="False">
                                       <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
@@ -305,7 +314,7 @@
                         <DataGridTemplateColumn.CellTemplate>
                           <DataTemplate>
                             <Button Content="削除" Width="58" Height="28" HorizontalAlignment="Center"
-                                    Style="{StaticResource SecondaryButton}"
+                                    Style="{StaticResource InlineButton}"
                                     Command="{Binding DataContext.RemoveItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                     CommandParameter="{Binding}"/>
                           </DataTemplate>

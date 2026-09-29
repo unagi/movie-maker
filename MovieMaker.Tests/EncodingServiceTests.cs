@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Text.Json;
+using MovieMaker.Models;
 using MovieMaker.Services;
 using Xunit;
 
@@ -5,6 +8,69 @@ namespace MovieMaker.Tests;
 
 public class EncodingServiceTests
 {
+    [Fact]
+    public void ValidateProductionInput_RejectsContradictoryImageDirection()
+    {
+        Assert.False(EncodingService.ValidateProductionInput(1080, 1920, 1,
+            EncodeProfile.Standard, 60, 50, out _));
+        Assert.False(EncodingService.ValidateProductionInput(1920, 1080, 1,
+            EncodeProfile.CopyrightCheckProduction, 60, 50, out _));
+        Assert.False(EncodingService.ValidateProductionInput(1080, 1920, 2,
+            EncodeProfile.CopyrightCheckProduction, 60, 50, out _));
+        Assert.True(EncodingService.ValidateProductionInput(1080, 1920, 1,
+            EncodeProfile.CopyrightCheckProduction, 60, 50, out _));
+    }
+
+    [Fact]
+    public void ShortsOutputLimit_RejectsStartTimeOffsetBeyondMaximum()
+    {
+        const string json = "{\"format\":{\"start_time\":\"0\",\"duration\":\"60\"}," +
+            "\"streams\":[{\"codec_type\":\"video\",\"start_time\":\"2\",\"duration\":\"59\"}," +
+            "{\"codec_type\":\"audio\",\"start_time\":\"0\",\"duration\":\"60\"}]}";
+
+        Assert.False(CheckShortsProbeJson(json, 60));
+    }
+
+    [Fact]
+    public void ShortsOutputLimit_RejectsContainerEndBeyondMaximum()
+    {
+        const string json = "{\"format\":{\"start_time\":\"2\",\"duration\":\"59\"}," +
+            "\"streams\":[{\"codec_type\":\"video\",\"start_time\":\"0\",\"duration\":\"60\"}," +
+            "{\"codec_type\":\"audio\",\"start_time\":\"0\",\"duration\":\"60\"}]}";
+
+        Assert.False(CheckShortsProbeJson(json, 60));
+    }
+
+    [Theory]
+    [InlineData("{\"duration\":\"60\"}", "{\"start_time\":\"0\",\"duration\":\"60\"}")]
+    [InlineData("{\"start_time\":\"0\",\"duration\":\"60\"}", "{\"start_time\":\"0\"}")]
+    public void ShortsOutputLimit_RejectsMissingTimingData(string format, string video)
+    {
+        var videoWithCodec = video.Insert(1, "\"codec_type\":\"video\",");
+        var json = "{\"format\":" + format + ",\"streams\":[" + videoWithCodec + "," +
+            "{\"codec_type\":\"audio\",\"start_time\":\"0\",\"duration\":\"60\"}]}";
+
+        Assert.False(CheckShortsProbeJson(json, 60));
+    }
+
+    [Fact]
+    public void ShortsOutputLimit_AcceptsKnownEndTimesAtMaximum()
+    {
+        const string json = "{\"format\":{\"end_time\":\"60\"}," +
+            "\"streams\":[{\"codec_type\":\"video\",\"end_time\":\"60\"}," +
+            "{\"codec_type\":\"audio\",\"start_time\":\"0\",\"duration\":\"60\"}]}";
+
+        Assert.True(CheckShortsProbeJson(json, 60));
+    }
+
+    private static bool CheckShortsProbeJson(string json, int limit)
+    {
+        using var document = JsonDocument.Parse(json);
+        var method = typeof(EncodingService).GetMethod("IsShortsOutputWithinLimit",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return (bool)method!.Invoke(null, [document.RootElement, limit])!;
+    }
     [Fact]
     public void BuildAudioFilter_ForShortsTrim_AddsFadeAndTrailingSilenceRemoval()
     {
@@ -29,6 +95,14 @@ public class EncodingServiceTests
         Assert.Equal(
             "afade=t=out:st=56:d=1,silenceremove=stop_periods=1:stop_duration=0.25:stop_threshold=-50dB",
             filter);
+    }
+
+    [Fact]
+    public void BuildAudioFilter_PreservesSubMillisecondSafeTarget()
+    {
+        var filter = EncodingService.BuildAudioFilter(trimTargetSeconds: 60.0001);
+
+        Assert.Contains("afade=t=out:st=59.0001:d=1", filter);
     }
 
     [Fact]

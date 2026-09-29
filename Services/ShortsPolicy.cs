@@ -4,6 +4,12 @@ namespace MovieMaker.Services;
 
 public static class ShortsPolicy
 {
+    public static bool AreSettingsValid(AppSettings settings) =>
+        settings.ShortsMaximumSeconds is >= 1 and <= 180 &&
+        double.IsFinite(settings.OneMinuteShortsOffsetSeconds) &&
+        settings.OneMinuteShortsOffsetSeconds is >= 0 and <= 59 &&
+        double.IsFinite(settings.ThreeMinuteShortsOffsetSeconds) &&
+        settings.ThreeMinuteShortsOffsetSeconds is >= 0 and < 120;
     public const double StrongShortsLimitSeconds = 60.0;
     public const double PlatformLimitSeconds = 180.0;
     public const double FadeSeconds = 1.0;
@@ -33,13 +39,13 @@ public static class ShortsPolicy
     public static double GetOneMinuteOffsetSeconds(AppSettings? settings = null)
     {
         var value = (settings ?? SettingsService.Current).OneMinuteShortsOffsetSeconds;
-        return Math.Clamp(Math.Round(value, 3), 0.0, 59.999);
+        return value;
     }
 
     public static double GetThreeMinuteOffsetSeconds(AppSettings? settings = null)
     {
         var value = (settings ?? SettingsService.Current).ThreeMinuteShortsOffsetSeconds;
-        return Math.Clamp(Math.Round(value, 3), 0.0, 179.999);
+        return value;
     }
 
     public static bool TryGetTrimTargetSeconds(double durationSeconds, out double targetSeconds, AppSettings? settings = null)

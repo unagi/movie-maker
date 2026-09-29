@@ -76,4 +76,40 @@ public class ShortsPolicyTests
         Assert.True(ShortsPolicy.TryGetTrimTargetSeconds(177.0, out var regularTarget, settings));
         Assert.Equal(176.875, regularTarget);
     }
+
+    [Theory]
+    [InlineData(60, 57, true, 57)]
+    [InlineData(60, 59, true, 57)]
+    [InlineData(60, 60, true, 57)]
+    [InlineData(60, 61, false, 0)]
+    [InlineData(61, 59, true, 57)]
+    [InlineData(61, 61, true, 0)]
+    [InlineData(120, 117, true, 0)]
+    [InlineData(180, 177, true, 177)]
+    [InlineData(180, 180, true, 177)]
+    public void HardMaximumAndLegacyBands_AreSeparateRules(int maximum, double duration,
+        bool eligible, double expectedTrimTarget)
+    {
+        var classification = OutputClassificationService.Classify(1080, 1920, 1, duration, maximum);
+        Assert.Equal(eligible, classification.CanEncodeInputs);
+        if (!eligible) return;
+
+        var hasTrim = ShortsPolicy.TryGetTrimTargetSeconds(duration, out var target, new AppSettings());
+        Assert.Equal(expectedTrimTarget > 0, hasTrim);
+        if (hasTrim) Assert.Equal(expectedTrimTarget, target);
+    }
+
+    [Theory]
+    [InlineData(59, 119.999, true)]
+    [InlineData(59.001, 3, false)]
+    [InlineData(3, 120, false)]
+    [InlineData(double.NaN, 3, false)]
+    public void SettingsValidity_UsesExactSafeOffsetBoundaries(double oneMinute, double threeMinute, bool expected)
+    {
+        Assert.Equal(expected, ShortsPolicy.AreSettingsValid(new AppSettings
+        {
+            OneMinuteShortsOffsetSeconds = oneMinute,
+            ThreeMinuteShortsOffsetSeconds = threeMinute
+        }));
+    }
 }

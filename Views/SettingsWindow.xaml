@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:conv="clr-namespace:MovieMaker.Converters"
-        Title="設定" Height="520" Width="640" ResizeMode="NoResize"
+        Title="設定" Height="740" Width="640" ResizeMode="NoResize"
         Background="Transparent" WindowStartupLocation="CenterOwner"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -47,6 +47,7 @@
             <Border Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}"
                     CornerRadius="10">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
@@ -69,6 +70,7 @@
             <Border Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}"
                     CornerRadius="10">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
@@ -131,7 +133,7 @@
           </Border>
           <StackPanel>
             <TextBlock Text="設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"/>
-            <TextBlock Text="出力先、アーカイブ、Shortsオフセット" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
+            <TextBlock Text="出力先、アーカイブ、ノーマライズ、Shortsオフセット" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
           </StackPanel>
         </StackPanel>
         <Button Grid.Column="1" Style="{StaticResource TitleBarButton}"
@@ -156,7 +158,7 @@
             <TextBox Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" Margin="0,6,0,0"
                      BorderBrush="{StaticResource BorderSoft}" Background="White"/>
           </StackPanel>
-          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Style="{StaticResource SecondaryButton}" Click="BrowseOutput_OnClick"/>
+          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Padding="10,4" Style="{StaticResource SecondaryButton}" Click="BrowseOutput_OnClick"/>
         </Grid>
       </Border>
 
@@ -176,14 +178,45 @@
             <TextBox Text="{Binding ArchiveDirectory, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" Margin="0,6,0,0"
                      BorderBrush="{StaticResource BorderSoft}" Background="White"/>
           </StackPanel>
-          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Style="{StaticResource SecondaryButton}" Click="BrowseArchive_OnClick"/>
+          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Padding="10,4" Style="{StaticResource SecondaryButton}" Click="BrowseArchive_OnClick"/>
         </Grid>
+      </Border>
+
+      <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+        <StackPanel>
+          <TextBlock Text="通常モードのノーマライズ目標" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+          <TextBlock Text="全トラックに使う既定値です。必要なトラックだけ、メイン画面で個別に上書きできます。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,10"/>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="120"/>
+              <ColumnDefinition Width="16"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="120"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Integrated LUFS" VerticalAlignment="Center" Foreground="{StaticResource TextPrimary}"/>
+            <TextBox Grid.Column="1" Text="{Binding NormalizationTargetIntegratedLufs, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+            <TextBlock Grid.Column="3" Text="True Peak (dBTP)" VerticalAlignment="Center" Foreground="{StaticResource TextPrimary}"/>
+            <TextBox Grid.Column="4" Text="{Binding NormalizationTargetTruePeakDbtp, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+          </Grid>
+          <TextBlock Text="範囲: -70〜-5 LUFS / -8〜0 dBTP（初期値: -14 / -1）" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,8,0,0"/>
+        </StackPanel>
       </Border>
 
       <Border Style="{StaticResource CardStyle}">
         <StackPanel>
           <TextBlock Text="Shortsオフセット秒" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
           <TextBlock Text="1分枠、3分枠から何秒安全側に引くかを設定します。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,12"/>
+
+          <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,12,0">
+              <TextBlock Text="ショート動画の最大秒数" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+              <TextBlock Text="1～180秒（初期値60秒）。入力と完成動画の上限です。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0"/>
+            </StackPanel>
+            <TextBox Grid.Column="1" Text="{Binding ShortsMaximumSeconds, UpdateSourceTrigger=PropertyChanged}"
+                     Height="32" Padding="8,4" BorderBrush="{StaticResource BorderSoft}" Background="White"/>
+          </Grid>
 
           <Grid Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
@@ -210,6 +243,8 @@
             <TextBox Grid.Column="1" Text="{Binding ThreeMinuteShortsOffsetSeconds, UpdateSourceTrigger=PropertyChanged}"
                      Height="32" Padding="8,4" BorderBrush="{StaticResource BorderSoft}" Background="White"/>
           </Grid>
+          <TextBlock Text="{Binding ShortsSettingsError}" Foreground="#D92D20" TextWrapping="Wrap"
+                     Margin="0,8,0,0" Visibility="{Binding ShortsSettingsError, Converter={StaticResource StringNotEmptyToVisibility}}"/>
         </StackPanel>
       </Border>
     </StackPanel>

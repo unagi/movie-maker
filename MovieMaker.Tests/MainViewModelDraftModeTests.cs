@@ -7,6 +7,10 @@ using Xunit;
 
 namespace MovieMaker.Tests;
 
+[CollectionDefinition("ProcessEnvironment", DisableParallelization = true)]
+public sealed class ProcessEnvironmentCollection;
+
+[Collection("ProcessEnvironment")]
 public class MainViewModelDraftModeTests
 {
     [Fact]
@@ -97,14 +101,119 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
-    public void CopyrightCheckProductionMode_UsesUpdatedLabel()
+    public void PortraitImage_AutoSelectsShortsProfile()
     {
-        var viewModel = new MainViewModel
-        {
-            SelectedProfile = EncodeProfile.CopyrightCheckProduction
-        };
+        var viewModel = new MainViewModel();
+        SetPrivateField(viewModel, "_imageWidth", 1080);
+        SetPrivateField(viewModel, "_imageHeight", 1920);
+        SetPrivateField(viewModel, "_orientation", VideoOrientation.Vertical);
 
         Assert.True(viewModel.EncodingSettingsText.Contains("本番画質・軽量音声", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PortraitImageWithoutAudio_IsConfirmedShortsAndWaitsForAudio()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        var image = temp.CreateImage("portrait.png", 90, 160);
+        var viewModel = new MainViewModel();
+
+        viewModel.HandleDrop([image]);
+
+        Assert.Equal(OutputKind.Shorts, viewModel.OutputClassification.Kind);
+        Assert.Equal(EncodeProfile.CopyrightCheckProduction, viewModel.SelectedProfile);
+        Assert.Contains("音声待ち", viewModel.InputStateMessage);
+        Assert.False(viewModel.CanEncode);
+    }
+
+    [Fact]
+    public void PortraitMultipleTracks_ErrorClearsWhenImageRemoved()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        var image = temp.CreateImage("portrait.png", 90, 160);
+        var viewModel = new MainViewModel();
+        viewModel.HandleDrop([image]);
+        viewModel.AudioTracks.Add(new AudioTrackItem("one.wav"));
+        viewModel.AudioTracks.Add(new AudioTrackItem("two.wav"));
+
+        Assert.True(viewModel.IsInputError);
+        Assert.Contains("1本だけ", viewModel.InputStateMessage);
+
+        viewModel.RemoveImageCommand.Execute(null);
+
+        Assert.Equal(OutputKind.AwaitingImage, viewModel.OutputClassification.Kind);
+        Assert.False(viewModel.IsInputError);
+    }
+
+    [Fact]
+    public void AnalyzedInvalidAudioDurationIsErrorWithoutImage()
+    {
+        var viewModel = new MainViewModel();
+        var track = new AudioTrackItem("invalid.wav");
+        track.ApplyAnalysis("解析済み", double.NaN);
+        viewModel.AudioTracks.Add(track);
+
+        Assert.True(viewModel.IsInputError);
+        Assert.Equal(OutputKind.InputError, viewModel.OutputClassification.Kind);
+    }
+
+    [Fact]
+    public void SettingsLoad_InvalidLegacyShortsOffset_RemainsVisibleUntilExplicitSave()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        File.WriteAllText(SettingsService.SettingsFilePath,
+            "{\"OneMinuteShortsOffsetSeconds\":59.5,\"ThreeMinuteShortsOffsetSeconds\":3}");
+
+        SettingsService.Load();
+
+        Assert.Equal(59.5, SettingsService.Current.OneMinuteShortsOffsetSeconds);
+        Assert.NotNull(SettingsService.LoadError);
+        var viewModel = new MainViewModel();
+        Assert.True(viewModel.IsInputError);
+        Assert.False(viewModel.CanEncode);
+
+        temp.PrepareSettings();
+        Assert.Null(SettingsService.LoadError);
+    }
+
+    [Fact]
+    public void DraftMode_InvalidShortsSettingsDoNotBlockEncoding()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        File.WriteAllText(SettingsService.SettingsFilePath,
+            "{\"OutputDirectory\":\"output\",\"ArchiveDirectory\":\"archive\"," +
+            "\"OneMinuteShortsOffsetSeconds\":59.5}");
+        SettingsService.Load();
+        var viewModel = new MainViewModel
+        {
+            Title = "draft-check",
+            UseDraftMode = true
+        };
+        viewModel.HandleDrop([temp.CreateFile("song.wav")]);
+
+        Assert.False(viewModel.IsInputError);
+        Assert.True(viewModel.CanEncode);
+        temp.PrepareSettings();
+    }
+
+    [Fact]
+    public void SettingsLoad_OldJsonUsesDefaultMaximumAndOverlayChoice()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        File.WriteAllText(SettingsService.SettingsFilePath,
+            "{\"OutputDirectory\":\"output\",\"ArchiveDirectory\":\"archive\"}");
+
+        SettingsService.Load();
+
+        Assert.Null(SettingsService.LoadError);
+        Assert.Equal(60, SettingsService.Current.ShortsMaximumSeconds);
+        Assert.True(SettingsService.Current.NormalTextOverlayEnabled);
     }
 
     [Fact]
@@ -396,6 +505,8 @@ public class MainViewModelDraftModeTests
         };
 
         SetPrivateField(viewModel, "_orientation", VideoOrientation.Vertical);
+        SetPrivateField(viewModel, "_imageWidth", 1080);
+        SetPrivateField(viewModel, "_imageHeight", 1920);
         SetPrivateField(viewModel, "_aspectValid", true);
         SetPrivateField(viewModel, "_audioDurationSeconds", 58.0);
 
@@ -420,7 +531,17 @@ public class MainViewModelDraftModeTests
 
         Assert.Contains(nameof(MainViewModel.OutputStatusText), changedProperties);
         Assert.Contains(nameof(MainViewModel.EncodingSettingsText), changedProperties);
-        Assert.Contains("(0:55)", viewModel.OutputStatusText, StringComparison.Ordinal);
+        Assert.Equal("本番画質・軽量音声 (YouTube Short) (0:55)", viewModel.OutputStatusText);
+
+        changedProperties.Clear();
+        SetPrivateField(viewModel, "_imageWidth", 1920);
+        SetPrivateField(viewModel, "_imageHeight", 1080);
+        SetPrivateField(viewModel, "_orientation", VideoOrientation.Horizontal);
+        InvokePrivateMethod(viewModel, "UpdateSettingsLabels");
+
+        Assert.Contains(nameof(MainViewModel.OutputStatusText), changedProperties);
+        Assert.Contains(nameof(MainViewModel.EncodingSettingsText), changedProperties);
+        Assert.Equal("YouTube (0:58)", viewModel.OutputStatusText);
     }
 
     private static void SetPrivateField(object target, string fieldName, object? value)
@@ -493,6 +614,14 @@ public class MainViewModelDraftModeTests
             const string onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
             var path = Path.Combine(_root, name);
             File.WriteAllBytes(path, Convert.FromBase64String(onePixelPng));
+            return path;
+        }
+
+        public string CreateImage(string name, int width, int height)
+        {
+            var path = Path.Combine(_root, name);
+            using var bitmap = new System.Drawing.Bitmap(width, height);
+            bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
             return path;
         }
 

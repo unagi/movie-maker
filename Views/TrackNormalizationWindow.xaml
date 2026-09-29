@@ -1,0 +1,73 @@
+<Window x:Class="MovieMaker.Views.TrackNormalizationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="トラックのノーマライズ目標" Width="430" SizeToContent="Height"
+        MinWidth="390" ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        Background="#F5F6F8" Icon="pack://application:,,,/Assets/app.ico">
+  <Window.Resources>
+    <Style x:Key="DialogButton" TargetType="Button">
+      <Setter Property="MinWidth" Value="88"/>
+      <Setter Property="MinHeight" Value="32"/>
+      <Setter Property="Padding" Value="12,5"/>
+    </Style>
+  </Window.Resources>
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <StackPanel>
+      <TextBlock Text="ノーマライズ目標" FontSize="16" FontWeight="SemiBold" Foreground="#111827"/>
+      <TextBlock x:Name="TrackNameText" Foreground="#6B7280" FontSize="12"
+                 TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/>
+    </StackPanel>
+
+    <StackPanel Grid.Row="1" Margin="0,16,0,0">
+      <RadioButton x:Name="CommonTargetRadio" GroupName="TargetMode" Margin="0,0,0,10"/>
+      <RadioButton x:Name="IndividualTargetRadio" Content="このトラックの目標を設定" GroupName="TargetMode"/>
+    </StackPanel>
+
+    <Border Grid.Row="2" Margin="22,10,0,0" Padding="12" Background="White"
+            BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="6"
+            IsEnabled="{Binding IsChecked, ElementName=IndividualTargetRadio}">
+      <StackPanel>
+        <TextBlock Text="個別の編集値（共通を選ぶと適用しません）" FontSize="11" Foreground="#6B7280" Margin="0,0,0,8"/>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="90"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="Integrated LUFS" VerticalAlignment="Center"/>
+          <TextBox x:Name="LufsTextBox" Grid.Column="1" Padding="6,4"/>
+        </Grid>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="90"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="True Peak (dBTP)" VerticalAlignment="Center"/>
+          <TextBox x:Name="TruePeakTextBox" Grid.Column="1" Padding="6,4"/>
+        </Grid>
+        <TextBlock Text="-70～-5 LUFS / -8～0 dBTP" FontSize="11" Foreground="#6B7280" Margin="0,8,0,0"/>
+      </StackPanel>
+    </Border>
+
+    <TextBlock x:Name="ValidationText" Grid.Row="3" Foreground="#B54708" TextWrapping="Wrap" Margin="0,8,0,0"/>
+
+    <Grid Grid.Row="4" Margin="0,18,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <Button Grid.Column="1" Content="キャンセル" Style="{StaticResource DialogButton}"
+              IsCancel="True" Margin="0,0,8,0"/>
+      <Button Grid.Column="2" Content="保存" Style="{StaticResource DialogButton}"
+              IsDefault="True" Click="Save_OnClick"/>
+    </Grid>
+  </Grid>
+</Window>
