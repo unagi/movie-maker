@@ -339,6 +339,83 @@ public class MainViewModelDraftModeTests
     }
 
     [Fact]
+    public void SelectedAudioTrackCommands_MoveToEveryBoundaryAndKeepSelection()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var first = temp.CreateFile("first.mp3");
+        var second = temp.CreateFile("second.wav");
+        var third = temp.CreateFile("third.m4a");
+        var viewModel = new MainViewModel { UseDraftMode = true };
+        viewModel.HandleDrop(new[] { first, second, third });
+
+        Assert.False(viewModel.MoveAudioTrackUpCommand.CanExecute(null));
+        viewModel.SelectedAudioTrack = viewModel.AudioTracks[1];
+        var selected = viewModel.SelectedAudioTrack;
+        viewModel.MoveAudioTrackFirstCommand.Execute(null);
+        Assert.Same(selected, viewModel.SelectedAudioTrack);
+        Assert.Equal(new[] { second, first, third }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.False(viewModel.MoveAudioTrackUpCommand.CanExecute(null));
+        Assert.False(viewModel.MoveAudioTrackFirstCommand.CanExecute(null));
+        viewModel.MoveAudioTrackDownCommand.Execute(null);
+        Assert.Equal(new[] { first, second, third }, viewModel.AudioTracks.Select(track => track.Path));
+        viewModel.MoveAudioTrackLastCommand.Execute(null);
+        Assert.Equal(new[] { first, third, second }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.False(viewModel.MoveAudioTrackDownCommand.CanExecute(null));
+        Assert.False(viewModel.MoveAudioTrackLastCommand.CanExecute(null));
+        viewModel.MoveAudioTrackUpCommand.Execute(null);
+        Assert.Equal(new[] { first, second, third }, viewModel.AudioTracks.Select(track => track.Path));
+        Assert.Same(selected, viewModel.SelectedAudioTrack);
+        Assert.Equal(new[] { 1, 2, 3 }, viewModel.AudioTracks.Select(track => track.Position));
+    }
+
+    [Fact]
+    public void SelectedAudioTrackCommands_DisableForOneTrackAndClearSelectionWhenRemoved()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var viewModel = new MainViewModel { UseDraftMode = true };
+        viewModel.HandleDrop(new[] { temp.CreateFile("only.mp3") });
+        viewModel.SelectedAudioTrack = viewModel.AudioTracks[0];
+
+        Assert.False(viewModel.MoveAudioTrackUpCommand.CanExecute(null));
+        Assert.False(viewModel.MoveAudioTrackDownCommand.CanExecute(null));
+        Assert.False(viewModel.MoveAudioTrackFirstCommand.CanExecute(null));
+        Assert.False(viewModel.MoveAudioTrackLastCommand.CanExecute(null));
+
+        viewModel.RemoveAudioTrackCommand.Execute(viewModel.SelectedAudioTrack);
+        Assert.Null(viewModel.SelectedAudioTrack);
+    }
+
+    [Fact]
+    public void SelectedAudioTrackCommands_NotifyAndDisableDuringEncodingAndAfterClear()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var viewModel = new MainViewModel { UseDraftMode = true };
+        viewModel.HandleDrop(new[] { temp.CreateFile("first.mp3"), temp.CreateFile("second.mp3") });
+        var notifications = 0;
+        viewModel.MoveAudioTrackDownCommand.CanExecuteChanged += (_, _) => notifications++;
+        viewModel.SelectedAudioTrack = viewModel.AudioTracks[0];
+        Assert.True(viewModel.MoveAudioTrackDownCommand.CanExecute(null));
+        Assert.True(notifications > 0);
+
+        typeof(MainViewModel).GetProperty(nameof(MainViewModel.IsEncoding))!.SetValue(viewModel, true);
+        Assert.False(viewModel.MoveAudioTrackDownCommand.CanExecute(null));
+        Assert.False(viewModel.MoveAudioTrackLastCommand.CanExecute(null));
+        typeof(MainViewModel).GetProperty(nameof(MainViewModel.IsEncoding))!.SetValue(viewModel, false);
+        Assert.True(viewModel.MoveAudioTrackDownCommand.CanExecute(null));
+
+        viewModel.ClearInputsCommand.Execute(null);
+        Assert.Null(viewModel.SelectedAudioTrack);
+        Assert.False(viewModel.MoveAudioTrackDownCommand.CanExecute(null));
+        Assert.True(notifications >= 4);
+    }
+
+    [Fact]
     public void StandardMode_SequentialAudioDropsAlsoAppendTracks()
     {
         using var temp = new TestWorkspace();

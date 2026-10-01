@@ -58,6 +58,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private double? _audioDurationSeconds;
     private bool _canEncode;
     private bool _isEncoding;
+    private AudioTrackItem? _selectedAudioTrack;
     private bool _isFileDragOver;
     private bool _isApplyingAutoTitle;
     private EncodeProfile _selectedProfile = EncodeProfile.Standard;
@@ -79,6 +80,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ClearInputsCommand = new RelayCommand(_ => ClearInputs(), _ => CanClearInputs);
         RemoveImageCommand = new RelayCommand(_ => RemoveImage(), _ => !IsEncoding && _imagePath != null);
         RemoveAudioTrackCommand = new RelayCommand(RemoveAudioTrack, track => !IsEncoding && track is AudioTrackItem);
+        MoveAudioTrackUpCommand = new RelayCommand(_ => MoveSelectedAudioTrack(-1), _ => CanMoveSelectedAudioTrack(-1));
+        MoveAudioTrackDownCommand = new RelayCommand(_ => MoveSelectedAudioTrack(1), _ => CanMoveSelectedAudioTrack(1));
+        MoveAudioTrackFirstCommand = new RelayCommand(_ => MoveSelectedAudioTrackTo(0), _ => CanMoveSelectedAudioTrackTo(0));
+        MoveAudioTrackLastCommand = new RelayCommand(_ => MoveSelectedAudioTrackTo(AudioTracks.Count - 1), _ => CanMoveSelectedAudioTrackTo(AudioTracks.Count - 1));
         ExportAudioTrackListCommand = new RelayCommand(_ => ExportAudioTrackList(), _ => !IsEncoding && AudioTracks.Count > 0);
         EncodeCommand = new AsyncRelayCommand(EncodeAsync, () => CanEncode);
 
@@ -94,9 +99,25 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand ClearInputsCommand { get; }
     public RelayCommand RemoveImageCommand { get; }
     public RelayCommand RemoveAudioTrackCommand { get; }
+    public RelayCommand MoveAudioTrackUpCommand { get; }
+    public RelayCommand MoveAudioTrackDownCommand { get; }
+    public RelayCommand MoveAudioTrackFirstCommand { get; }
+    public RelayCommand MoveAudioTrackLastCommand { get; }
     public RelayCommand ExportAudioTrackListCommand { get; }
     public AsyncRelayCommand EncodeCommand { get; }
     public ObservableCollection<AudioTrackItem> AudioTracks { get; } = [];
+
+    public AudioTrackItem? SelectedAudioTrack
+    {
+        get => _selectedAudioTrack;
+        set
+        {
+            if (ReferenceEquals(_selectedAudioTrack, value)) return;
+            _selectedAudioTrack = value;
+            OnPropertyChanged();
+            RaiseAudioTrackMoveCanExecuteChanged();
+        }
+    }
 
     public string Title
     {
@@ -131,11 +152,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         get
         {
-            if (IsStandardProfile)
-            {
-                return null;
-            }
-
             if (SelectedProfile != EncodeProfile.DraftPreview)
             {
                 return ImagePreview;
@@ -330,6 +346,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 IsFileDragOver = false;
             }
             RemoveAudioTrackCommand.RaiseCanExecuteChanged();
+            RaiseAudioTrackMoveCanExecuteChanged();
             ExportAudioTrackListCommand.RaiseCanExecuteChanged();
             OpenTextOverlayEditorCommand.RaiseCanExecuteChanged();
         }
@@ -876,6 +893,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 SettingsService.Current.NormalizationTargetTruePeakDbtp);
             track.PropertyChanged += AudioTrack_PropertyChanged;
             AudioTracks.Add(track);
+            RaiseAudioTrackMoveCanExecuteChanged();
             ExportAudioTrackListCommand.RaiseCanExecuteChanged();
             addedCount++;
             _audioDurationSeconds = null;
@@ -896,6 +914,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         track.PropertyChanged -= AudioTrack_PropertyChanged;
+        if (ReferenceEquals(SelectedAudioTrack, track)) SelectedAudioTrack = null;
+        RaiseAudioTrackMoveCanExecuteChanged();
         ExportAudioTrackListCommand.RaiseCanExecuteChanged();
         RecalculateAudioDuration();
         UpdateAudioTrackPositions();
@@ -914,10 +934,43 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         AudioTracks.Move(oldIndex, newIndex);
+        RaiseAudioTrackMoveCanExecuteChanged();
         UpdateAudioTrackPositions();
         NotifyStatusChanged();
         UpdateValidation(false);
         StatusMessage = $"音声トラックを{oldIndex + 1}番目から{newIndex + 1}番目へ移動しました";
+    }
+
+    private bool CanMoveSelectedAudioTrack(int delta)
+    {
+        var index = SelectedAudioTrack == null ? -1 : AudioTracks.IndexOf(SelectedAudioTrack);
+        return !IsEncoding && index >= 0 && index + delta >= 0 && index + delta < AudioTracks.Count;
+    }
+
+    private bool CanMoveSelectedAudioTrackTo(int targetIndex)
+    {
+        var index = SelectedAudioTrack == null ? -1 : AudioTracks.IndexOf(SelectedAudioTrack);
+        return !IsEncoding && index >= 0 && targetIndex >= 0 && targetIndex < AudioTracks.Count && index != targetIndex;
+    }
+
+    private void MoveSelectedAudioTrack(int delta)
+    {
+        if (!CanMoveSelectedAudioTrack(delta)) return;
+        MoveAudioTrack(AudioTracks.IndexOf(SelectedAudioTrack!), AudioTracks.IndexOf(SelectedAudioTrack!) + delta);
+    }
+
+    private void MoveSelectedAudioTrackTo(int targetIndex)
+    {
+        if (!CanMoveSelectedAudioTrackTo(targetIndex)) return;
+        MoveAudioTrack(AudioTracks.IndexOf(SelectedAudioTrack!), targetIndex);
+    }
+
+    private void RaiseAudioTrackMoveCanExecuteChanged()
+    {
+        MoveAudioTrackUpCommand.RaiseCanExecuteChanged();
+        MoveAudioTrackDownCommand.RaiseCanExecuteChanged();
+        MoveAudioTrackFirstCommand.RaiseCanExecuteChanged();
+        MoveAudioTrackLastCommand.RaiseCanExecuteChanged();
     }
 
     private void AudioTrack_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1031,6 +1084,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             track.PropertyChanged -= AudioTrack_PropertyChanged;
         }
         AudioTracks.Clear();
+        SelectedAudioTrack = null;
+        RaiseAudioTrackMoveCanExecuteChanged();
         ExportAudioTrackListCommand.RaiseCanExecuteChanged();
         _audioDurationSeconds = null;
         _imageWidth = 0;

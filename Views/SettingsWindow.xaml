@@ -141,7 +141,8 @@
       </Grid>
     </Border>
 
-    <StackPanel Grid.Row="1" Margin="20">
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="20">
       <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
         <Grid>
           <Grid.ColumnDefinitions>
@@ -158,7 +159,10 @@
             <TextBox Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" Margin="0,6,0,0"
                      BorderBrush="{StaticResource BorderSoft}" Background="White"/>
           </StackPanel>
-          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Padding="10,4" Style="{StaticResource SecondaryButton}" Click="BrowseOutput_OnClick"/>
+          <StackPanel Grid.Column="2" VerticalAlignment="Center">
+            <Button Content="参照" Width="70" Height="32" Padding="10,4" Style="{StaticResource SecondaryButton}" Click="BrowseOutput_OnClick"/>
+            <Button Content="開く" Width="70" Height="32" Padding="10,4" Margin="0,4,0,0" Style="{StaticResource SecondaryButton}" Click="OpenOutput_OnClick" ToolTip="入力中の出力先フォルダーを開く"/>
+          </StackPanel>
         </Grid>
       </Border>
 
@@ -178,7 +182,10 @@
             <TextBox Text="{Binding ArchiveDirectory, UpdateSourceTrigger=PropertyChanged}" Height="32" Padding="8,4" Margin="0,6,0,0"
                      BorderBrush="{StaticResource BorderSoft}" Background="White"/>
           </StackPanel>
-          <Button Grid.Column="2" Content="参照" Width="70" Height="32" Padding="10,4" Style="{StaticResource SecondaryButton}" Click="BrowseArchive_OnClick"/>
+          <StackPanel Grid.Column="2" VerticalAlignment="Center">
+            <Button Content="参照" Width="70" Height="32" Padding="10,4" Style="{StaticResource SecondaryButton}" Click="BrowseArchive_OnClick"/>
+            <Button Content="開く" Width="70" Height="32" Padding="10,4" Margin="0,4,0,0" Style="{StaticResource SecondaryButton}" Click="OpenArchive_OnClick" ToolTip="入力中のアーカイブフォルダーを開く"/>
+          </StackPanel>
         </Grid>
       </Border>
 
@@ -248,6 +255,7 @@
         </StackPanel>
       </Border>
     </StackPanel>
+    </ScrollViewer>
 
         <Grid Grid.Row="2" Margin="20,0,20,16">
           <Grid.ColumnDefinitions>

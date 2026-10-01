@@ -66,6 +66,35 @@ public partial class SettingsWindow : Window
         Close();
     }
 
+    private void OpenOutput_OnClick(object sender, RoutedEventArgs e) => OpenFolder(_viewModel.OutputDirectory);
+
+    private void OpenArchive_OnClick(object sender, RoutedEventArgs e) => OpenFolder(_viewModel.ArchiveDirectory);
+
+    private void OpenFolder(string path)
+    {
+        var folder = path.Trim();
+        if (!Directory.Exists(folder))
+        {
+            System.Windows.MessageBox.Show(this, "存在するフォルダーを指定してください。", "フォルダーを開く",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = folder,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception)
+        {
+            System.Windows.MessageBox.Show(this, "フォルダーを開けませんでした。パスとアクセス権を確認してください。", "フォルダーを開く",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void Cancel_OnClick(object sender, RoutedEventArgs e)
     {
         this.DialogResult = false;

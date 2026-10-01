@@ -1,4 +1,5 @@
 ﻿using System.Windows;
+using System.Collections.Specialized;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -22,11 +23,57 @@ public partial class MainWindow : Window
     private AudioTrackItem? _draggedAudioTrack;
     private AudioTrackItem? _audioDropTarget;
     private bool _audioDropAfter;
+    private int _audioMoveFocusVersion;
+    private bool _cancelPendingAudioMoveFocus;
 
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = new MainViewModel();
+        var viewModel = new MainViewModel();
+        DataContext = viewModel;
+        AudioTrackList.PreviewKeyDown += AudioTrackList_OnPreviewKeyDown;
+        AudioTrackList.PreviewMouseDown += (_, _) => _cancelPendingAudioMoveFocus = true;
+        viewModel.AudioTracks.CollectionChanged += AudioTracks_CollectionChanged;
+    }
+
+    private void AudioTrackList_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (Keyboard.Modifiers != ModifierKeys.Alt || DataContext is not MainViewModel viewModel)
+        {
+            _cancelPendingAudioMoveFocus = true;
+            return;
+        }
+        var command = key switch
+        {
+            Key.Up => viewModel.MoveAudioTrackUpCommand,
+            Key.Down => viewModel.MoveAudioTrackDownCommand,
+            Key.Home => viewModel.MoveAudioTrackFirstCommand,
+            Key.End => viewModel.MoveAudioTrackLastCommand,
+            _ => null
+        };
+        if (command == null) return;
+        if (command.CanExecute(null)) command.Execute(null);
+        e.Handled = true;
+    }
+
+    private void AudioTracks_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action != NotifyCollectionChangedAction.Move || e.NewItems?[0] is not AudioTrackItem movedTrack) return;
+        var focusVersion = ++_audioMoveFocusVersion;
+        _cancelPendingAudioMoveFocus = false;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (focusVersion != _audioMoveFocusVersion || _cancelPendingAudioMoveFocus ||
+                DataContext is not MainViewModel viewModel || !viewModel.AudioTracks.Contains(movedTrack)) return;
+            viewModel.SelectedAudioTrack = movedTrack;
+            AudioTrackList.ScrollIntoView(movedTrack);
+            AudioTrackList.UpdateLayout();
+            if (AudioTrackList.ItemContainerGenerator.ContainerFromItem(movedTrack) is ListBoxItem item)
+            {
+                item.Focus();
+            }
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private void EditTrackNormalization_OnClick(object sender, RoutedEventArgs e)
