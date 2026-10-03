@@ -79,12 +79,14 @@ public partial class MainWindow : Window
     private void EditTrackNormalization_OnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not System.Windows.Controls.Button { DataContext: AudioTrackItem track } button ||
-            DataContext is not MainViewModel { IsEncoding: false })
+            DataContext is not MainViewModel { IsEncoding: false } viewModel)
         {
             return;
         }
 
-        new TrackNormalizationWindow(track) { Owner = this }.ShowDialog();
+        if (new TrackNormalizationWindow(track, viewModel.CurrentNormalizationTargetLufs,
+                viewModel.CurrentNormalizationTargetTruePeak) { Owner = this }.ShowDialog() == true)
+            viewModel.ConfirmTrackNormalization(track);
         button.Focus();
     }
 

@@ -6,17 +6,26 @@ using System.Windows.Input;
 using System.Windows.Media;
 using MovieMaker.Services;
 using MovieMaker.ViewModels;
+using MovieMaker.Models;
 
 namespace MovieMaker.Views;
 
 public partial class SettingsWindow : Window
 {
     private readonly SettingsViewModel _viewModel;
+    private readonly bool _environmentOnly;
 
-    public SettingsWindow()
+    public SettingsWindow(bool environmentOnly = false)
     {
         InitializeComponent();
         _viewModel = new SettingsViewModel(SettingsService.Current);
+        _environmentOnly = environmentOnly;
+        if (environmentOnly)
+        {
+            SettingsDescription.Text = "出力先とアーカイブ先。処理設定は主画面の「今回の設定」で編集します。";
+            NormalizationSettingsCard.Visibility = Visibility.Collapsed;
+            ShortsSettingsCard.Visibility = Visibility.Collapsed;
+        }
         DataContext = _viewModel;
     }
 
@@ -40,7 +49,24 @@ public partial class SettingsWindow : Window
 
     private void Save_OnClick(object sender, RoutedEventArgs e)
     {
-        if (!_viewModel.TryCreateSettings(out var settings, out var errorMessage))
+        AppSettings settings;
+        if (_environmentOnly)
+        {
+            var current = SettingsService.Current;
+            settings = new AppSettings
+            {
+                OutputDirectory = _viewModel.OutputDirectory.Trim(),
+                ArchiveDirectory = _viewModel.ArchiveDirectory.Trim(),
+                ShortsMaximumSeconds = current.ShortsMaximumSeconds,
+                OneMinuteShortsOffsetSeconds = current.OneMinuteShortsOffsetSeconds,
+                ThreeMinuteShortsOffsetSeconds = current.ThreeMinuteShortsOffsetSeconds,
+                NormalizationTargetIntegratedLufs = current.NormalizationTargetIntegratedLufs,
+                NormalizationTargetTruePeakDbtp = current.NormalizationTargetTruePeakDbtp,
+                NormalTextOverlayEnabled = current.NormalTextOverlayEnabled,
+                TextOverlayLayoutJson = current.TextOverlayLayoutJson
+            };
+        }
+        else if (!_viewModel.TryCreateSettings(out settings, out var errorMessage))
         {
             System.Windows.MessageBox.Show(
                 errorMessage ?? "設定値を確認してください。",

@@ -1,0 +1,47 @@
+<Window x:Class="MovieMaker.Views.ArchiveProjectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="今回の設定を確認" Width="560" MinWidth="500" SizeToContent="Height" MaxHeight="760"
+        WindowStartupLocation="CenterOwner" Background="#F5F6F8">
+    <Window.Resources>
+        <Style TargetType="TextBox"><Setter Property="Padding" Value="7,5"/><Setter Property="Margin" Value="0,4,0,10"/></Style>
+        <Style TargetType="Button"><Setter Property="MinWidth" Value="88"/><Setter Property="Height" Value="32"/><Setter Property="Padding" Value="12,5"/></Style>
+    </Window.Resources>
+    <Grid Margin="18">
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="今回の設定" FontSize="18" FontWeight="SemiBold"/>
+                <TextBlock Margin="0,8,0,16" TextWrapping="Wrap" Text="記録がない設定は現在の設定を候補として表示しています。確認・修正して今回の設定として確定してください。"/>
+                <TextBlock Text="タイトル"/><TextBox x:Name="TitleTextBox"/>
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="ImageModeRadio" Content="画像モード" GroupName="Mode" Checked="Mode_OnChanged" Margin="0,0,20,0"/>
+                    <RadioButton x:Name="DraftModeRadio" Content="Draft" GroupName="Mode" Checked="Mode_OnChanged"/>
+                </StackPanel>
+                <TextBlock x:Name="OrientationText" Margin="0,8,0,12"/>
+                <StackPanel x:Name="ImageSettingsPanel">
+                    <TextBlock Text="共通LUFS（-70～-5）"/><TextBox x:Name="LufsTextBox"/>
+                    <TextBlock Text="共通True Peak（-8～0 dBTP）"/><TextBox x:Name="TruePeakTextBox"/>
+                    <CheckBox x:Name="OverlayEnabledCheckBox" Content="通常モードで文字を合成する" Checked="Mode_OnChanged" Unchecked="Mode_OnChanged"/>
+                    <Button x:Name="EditLayoutButton" Content="文字合成レイアウト" HorizontalAlignment="Left" Margin="0,8,0,12" Click="EditLayout_OnClick"/>
+                    <CheckBox x:Name="ConfirmUnknownTracksCheckBox" Content="個別設定の記録がない音声は、今回は共通目標を使う"/>
+                </StackPanel>
+                <StackPanel x:Name="DraftSettingsPanel" Margin="0,0,0,12">
+                    <TextBlock Text="Draftの音声品質" Margin="0,0,0,6"/>
+                    <RadioButton x:Name="DraftHighRadio" Content="高音質（44.1 kHz / 256 kbps）" GroupName="Quality"/>
+                    <RadioButton x:Name="DraftLowRadio" Content="低音質（32 kHz / 128 kbps）" GroupName="Quality" Margin="0,6,0,0"/>
+                </StackPanel>
+                <StackPanel x:Name="ShortsSettingsPanel">
+                    <TextBlock Text="Shorts上限秒数（1～180）"/><TextBox x:Name="ShortsMaximumTextBox"/>
+                    <TextBlock Text="1分Shorts余裕秒数（0～59）"/><TextBox x:Name="OneMinuteOffsetTextBox"/>
+                    <TextBlock Text="3分Shorts余裕秒数（0以上120未満）"/><TextBox x:Name="ThreeMinuteOffsetTextBox"/>
+                </StackPanel>
+                <TextBlock x:Name="ValidationText" Foreground="#B42318" TextWrapping="Wrap" Margin="0,10,0,4"/>
+            </StackPanel>
+        </ScrollViewer>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="キャンセル" IsCancel="True" Margin="0,0,10,0"/>
+            <Button Content="今回の設定として確定" IsDefault="True" Click="Confirm_OnClick"/>
+        </StackPanel>
+    </Grid>
+</Window>

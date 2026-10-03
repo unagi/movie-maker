@@ -288,6 +288,9 @@
           <TextBlock Text="設定でアーカイブ先フォルダーを指定してください。" TextWrapping="Wrap" Margin="0,4,0,0"
                      Foreground="{StaticResource WarningForeground}" FontSize="12"
                      Visibility="{Binding ArchiveDirectoryPath, Converter={StaticResource StringEmptyToVisibility}}"/>
+          <TextBlock Text="{Binding ArchiveStateMessage}" TextWrapping="Wrap" Margin="0,6,0,0"
+                     Foreground="{StaticResource TextSecondary}" FontSize="11"
+                     Visibility="{Binding HasRestoredProject, Converter={StaticResource BoolToVisibility}}"/>
         </StackPanel>
         <Border Grid.Column="1" Style="{StaticResource CardStyle}" Margin="16,0,0,0">
           <StackPanel>
@@ -530,6 +533,10 @@
           <Button Content="設定" Command="{Binding OpenSettingsCommand}" Style="{StaticResource InlineButton}" Margin="0,0,8,4"
                   ToolTip="出力先・アーカイブ・ノーマライズなどを設定"/>
           <Button Content="出力フォルダーを開く" Command="{Binding OpenOutputFolderCommand}" Style="{StaticResource InlineButton}" Margin="0,0,8,4"/>
+          <Button Content="復元設定を読み込む" Command="{Binding LoadArchiveProjectCommand}" Style="{StaticResource InlineButton}" Margin="0,0,8,4"/>
+          <Button Content="復元設定を保存" Command="{Binding SaveArchiveProjectCommand}" Style="{StaticResource InlineButton}" Margin="0,0,8,4"/>
+          <Button Content="今回の設定" Command="{Binding ReviewArchiveSettingsCommand}" Style="{StaticResource InlineButton}" Margin="0,0,8,4"
+                  Visibility="{Binding HasRestoredProject, Converter={StaticResource BoolToVisibility}}"/>
           <Button Content="入力をクリア" Command="{Binding ClearInputsCommand}" Style="{StaticResource InlineButton}" Margin="0,0,0,4"/>
         </WrapPanel>
         <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Content="▶ エンコード開始"

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -17,7 +17,7 @@ using MovieMaker.Views;
 
 namespace MovieMaker.ViewModels;
 
-public sealed class MainViewModel : INotifyPropertyChanged
+public sealed partial class MainViewModel : INotifyPropertyChanged
 {
     private const double AspectTolerance = 0.01; // 1%
     private const double VerticalRatio = 9.0 / 16.0;
@@ -86,6 +86,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         MoveAudioTrackLastCommand = new RelayCommand(_ => MoveSelectedAudioTrackTo(AudioTracks.Count - 1), _ => CanMoveSelectedAudioTrackTo(AudioTracks.Count - 1));
         ExportAudioTrackListCommand = new RelayCommand(_ => ExportAudioTrackList(), _ => !IsEncoding && AudioTracks.Count > 0);
         EncodeCommand = new AsyncRelayCommand(EncodeAsync, () => CanEncode);
+        InitializeArchiveCommands();
 
         UpdateSettingsLabels();
         UpdateValidation(true);
@@ -184,39 +185,40 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string InputSectionHeader => "入力とプレビュー";
     public OutputClassification OutputClassification => OutputClassificationService.Classify(
         _imageWidth, _imageHeight, AudioTracks.Count, _audioDurationSeconds,
-        SettingsService.Current.ShortsMaximumSeconds,
+        CurrentEncodingSettings.ShortsMaximumSeconds,
         AudioTracks.Any(track => track.IsDurationAnalysisFailed));
-    private bool HasBlockingSettingsLoadError => SettingsService.LoadError != null &&
-        (!UseDraftMode || ShortsPolicy.AreSettingsValid(SettingsService.Current));
+    private bool HasBlockingSettingsLoadError => _jobSettings == null && SettingsService.LoadError != null &&
+        (!UseDraftMode || ShortsPolicy.AreSettingsValid(CurrentEncodingSettings));
     public string InputStateMessage => (HasBlockingSettingsLoadError ? SettingsService.LoadError : null) ??
         (UseDraftMode ? "仮動画" :
-            !ShortsPolicy.AreSettingsValid(SettingsService.Current) ? "Shorts上限・オフセット設定を修正してください" :
+            !ShortsPolicy.AreSettingsValid(CurrentEncodingSettings) ? "Shorts上限・オフセット設定を修正してください" :
             OutputClassification.Message);
     public bool IsInputError => HasBlockingSettingsLoadError ||
-        !UseDraftMode && !ShortsPolicy.AreSettingsValid(SettingsService.Current) ||
+        !UseDraftMode && !ShortsPolicy.AreSettingsValid(CurrentEncodingSettings) ||
         !UseDraftMode && OutputClassification.Kind == OutputKind.InputError;
     public bool HasNormalLengthWarning => !UseDraftMode && OutputClassification.HasNormalLengthWarning;
     public bool IsNormalOutput => !UseDraftMode && OutputClassification.Kind == OutputKind.Normal;
     public bool NormalTextOverlayEnabled
     {
-        get => SettingsService.Current.NormalTextOverlayEnabled;
+        get => CurrentEncodingSettings.NormalTextOverlayEnabled;
         set
         {
-            if (SettingsService.Current.NormalTextOverlayEnabled == value) return;
-            if (SettingsService.LoadError != null)
+            if (CurrentEncodingSettings.NormalTextOverlayEnabled == value) return;
+            if (_jobSettings == null && SettingsService.LoadError != null)
             {
                 StatusMessage = SettingsService.LoadError;
                 OnPropertyChanged();
                 return;
             }
-            SettingsService.Current.NormalTextOverlayEnabled = value;
-            SettingsService.Save(SettingsService.Current);
+            CurrentEncodingSettings.NormalTextOverlayEnabled = value;
+            if (_jobSettings == null) SettingsService.Save(CurrentEncodingSettings);
+            else if (_restoredProject != null) _restoredProject.Settings.NormalTextOverlayEnabled = value;
             OnPropertyChanged();
             UpdateValidation(true);
         }
     }
     public string TextOverlayLayoutStatusText =>
-        TextOverlayService.TryParse(SettingsService.Current.TextOverlayLayoutJson, out _, out _)
+        TextOverlayService.TryParse(CurrentEncodingSettings.TextOverlayLayoutJson, out _, out _)
             ? "設定済み"
             : "未設定";
 
@@ -349,6 +351,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             RaiseAudioTrackMoveCanExecuteChanged();
             ExportAudioTrackListCommand.RaiseCanExecuteChanged();
             OpenTextOverlayEditorCommand.RaiseCanExecuteChanged();
+            RefreshArchiveCommands();
         }
     }
 
@@ -489,6 +492,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
 
             _draftAudioQuality = DraftAudioQuality.High;
+            if (_restoredProject != null) _restoredProject.DraftAudioQuality = _draftAudioQuality;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsDraftAudioQualityLow));
             NotifyStatusChanged();
@@ -511,6 +515,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
 
             _draftAudioQuality = DraftAudioQuality.Low;
+            if (_restoredProject != null) _restoredProject.DraftAudioQuality = _draftAudioQuality;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsDraftAudioQualityHigh));
             NotifyStatusChanged();
@@ -624,8 +629,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
 
             var duration = _audioDurationSeconds.Value;
-            if (orientation == VideoOrientation.Vertical && duration <= SettingsService.Current.ShortsMaximumSeconds &&
-                ShortsPolicy.TryGetTrimTargetSeconds(duration, out var targetSeconds))
+            if (orientation == VideoOrientation.Vertical && duration <= CurrentEncodingSettings.ShortsMaximumSeconds &&
+                ShortsPolicy.TryGetTrimTargetSeconds(duration, out var targetSeconds, CurrentEncodingSettings))
             {
                 duration = targetSeconds;
             }
@@ -663,7 +668,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             if (IsNormalOutput)
             {
-                var settings = SettingsService.Current;
+                var settings = CurrentEncodingSettings;
                 var overrideCount = AudioTracks.Count(track => track.IsNormalizationOverrideEnabled);
                 lines.Insert(lines.IndexOf("出力制御"),
                     $"・ノーマライズ: 既定 {settings.NormalizationTargetIntegratedLufs:0.###} LUFS / " +
@@ -703,6 +708,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         if (files == null || files.Length == 0)
         {
+            return;
+        }
+
+        if (files.Any(path => string.Equals(Path.GetExtension(path), ".json", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (files.Length != 1)
+                StatusMessage = "復元用JSONは、画像や音声と混ぜず1ファイルだけドロップしてください";
+            else
+                LoadArchiveProject(files[0]);
             return;
         }
 
@@ -889,8 +903,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 continue;
             }
 
-            var track = new AudioTrackItem(path, SettingsService.Current.NormalizationTargetIntegratedLufs,
-                SettingsService.Current.NormalizationTargetTruePeakDbtp);
+            var track = new AudioTrackItem(path, CurrentEncodingSettings.NormalizationTargetIntegratedLufs,
+                CurrentEncodingSettings.NormalizationTargetTruePeakDbtp);
             track.PropertyChanged += AudioTrack_PropertyChanged;
             AudioTracks.Add(track);
             RaiseAudioTrackMoveCanExecuteChanged();
@@ -914,6 +928,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         track.PropertyChanged -= AudioTrack_PropertyChanged;
+        _restoredTracks.Remove(track);
         if (ReferenceEquals(SelectedAudioTrack, track)) SelectedAudioTrack = null;
         RaiseAudioTrackMoveCanExecuteChanged();
         ExportAudioTrackListCommand.RaiseCanExecuteChanged();
@@ -975,9 +990,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void AudioTrack_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_isApplyingArchiveSettings) return;
         if (e.PropertyName is nameof(AudioTrackItem.IsNormalizationOverrideEnabled) or
             nameof(AudioTrackItem.NormalizationTargetLufsText) or nameof(AudioTrackItem.NormalizationTargetTruePeakText))
         {
+            if (sender is AudioTrackItem track) ConfirmTrackNormalization(track);
             OnPropertyChanged(nameof(EncodingSettingsText));
             UpdateValidation(true);
         }
@@ -1068,6 +1085,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void ClearInputs()
     {
+        ResetArchiveState();
         var titleChanged = !string.IsNullOrEmpty(_title);
         _title = string.Empty;
         _autoFilledTitle = null;
@@ -1155,8 +1173,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void UpdateSettingsLabels()
     {
-        var output = SettingsService.Current.OutputDirectory?.Trim() ?? string.Empty;
-        var archive = SettingsService.Current.ArchiveDirectory?.Trim() ?? string.Empty;
+        var output = CurrentEncodingSettings.OutputDirectory?.Trim() ?? string.Empty;
+        var archive = CurrentEncodingSettings.ArchiveDirectory?.Trim() ?? string.Empty;
 
         OutputDirectoryLabel = string.IsNullOrWhiteSpace(output)
             ? "出力先: 未設定"
@@ -1177,6 +1195,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void UpdateValidation(bool updateStatus)
     {
         var errors = new List<string>();
+        var archiveMissing = GetArchiveMissingFields();
+        if (archiveMissing.Count > 0)
+            errors.Add("今回の設定を確認してください: " + string.Join("、", archiveMissing));
+        if (HasRestoredProject)
+        {
+            if (AudioTracks.Any(track => track.IsDurationAnalysisFailed))
+                errors.Add("復元した音声の長さを解析できませんでした。素材を確認してください");
+            else if (AudioTracks.Any(track => !track.DurationSeconds.HasValue || !track.IsLoudnessAnalysisComplete))
+                errors.Add("復元した音声を解析しています");
+        }
         var title = Title?.Trim() ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(title))
@@ -1188,12 +1216,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             errors.Add("タイトルに使用できない文字が含まれています");
         }
 
-        if (string.IsNullOrWhiteSpace(SettingsService.Current.OutputDirectory))
+        if (string.IsNullOrWhiteSpace(CurrentEncodingSettings.OutputDirectory))
         {
             errors.Add("出力先ディレクトリが未設定です");
         }
 
-        if (string.IsNullOrWhiteSpace(SettingsService.Current.ArchiveDirectory))
+        if (string.IsNullOrWhiteSpace(CurrentEncodingSettings.ArchiveDirectory))
         {
             errors.Add("アーカイブディレクトリが未設定です");
         }
@@ -1209,9 +1237,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 errors.Add(OutputClassification.Message);
             }
             if (IsNormalOutput && NormalTextOverlayEnabled &&
-                !TextOverlayService.TryParse(SettingsService.Current.TextOverlayLayoutJson, out _, out var overlayError))
+                !TextOverlayService.TryParse(CurrentEncodingSettings.TextOverlayLayoutJson, out _, out var overlayError))
             {
-                errors.Add(string.IsNullOrWhiteSpace(SettingsService.Current.TextOverlayLayoutJson)
+                errors.Add(string.IsNullOrWhiteSpace(CurrentEncodingSettings.TextOverlayLayoutJson)
                     ? "文字入れJSONを設定してください"
                     : $"文字入れJSONを確認してください: {overlayError}");
             }
@@ -1221,7 +1249,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
         }
 
-        if (HasBlockingSettingsLoadError || !UseDraftMode && !ShortsPolicy.AreSettingsValid(SettingsService.Current))
+        if (HasBlockingSettingsLoadError || !UseDraftMode && !ShortsPolicy.AreSettingsValid(CurrentEncodingSettings))
             errors.Add(SettingsService.LoadError ?? "Shorts上限・オフセット設定を修正してください");
 
         if (AudioTracks.Count == 0)
@@ -1236,6 +1264,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         var hasErrors = errors.Count > 0;
         CanEncode = !hasErrors && !IsEncoding;
+        RefreshArchiveCommands();
         ClearInputsCommand.RaiseCanExecuteChanged();
 
         if (updateStatus)
@@ -1257,6 +1286,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void NotifyStatusChanged()
     {
+        OnPropertyChanged(nameof(ArchiveStateMessage));
+        RefreshArchiveCommands();
         OnPropertyChanged(nameof(IsImageReady));
         OnPropertyChanged(nameof(IsBackgroundAspectWarning));
         OnPropertyChanged(nameof(ImageStatusText));
@@ -1285,14 +1316,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(EffectiveImageCaption));
     }
 
-    private static bool TryParseTrackNormalizationTargets(AudioTrackItem track, out double targetLufs, out double targetTruePeak)
+    private bool TryParseTrackNormalizationTargets(AudioTrackItem track, out double targetLufs, out double targetTruePeak)
     {
         targetLufs = 0;
         targetTruePeak = 0;
         var lufsText = track.IsNormalizationOverrideEnabled ? track.NormalizationTargetLufsText :
-            SettingsService.Current.NormalizationTargetIntegratedLufs.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            CurrentEncodingSettings.NormalizationTargetIntegratedLufs.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         var peakText = track.IsNormalizationOverrideEnabled ? track.NormalizationTargetTruePeakText :
-            SettingsService.Current.NormalizationTargetTruePeakDbtp.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            CurrentEncodingSettings.NormalizationTargetTruePeakDbtp.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         if (!double.TryParse(lufsText, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out targetLufs) ||
             !double.TryParse(peakText, System.Globalization.NumberStyles.Float,
@@ -1375,9 +1406,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         };
     }
 
-    private static string GetShortsRuleText(double durationSeconds)
+    private string GetShortsRuleText(double durationSeconds)
     {
-        if (ShortsPolicy.TryGetTrimTargetSeconds(durationSeconds, out var targetSeconds))
+        if (ShortsPolicy.TryGetTrimTargetSeconds(durationSeconds, out var targetSeconds, CurrentEncodingSettings))
         {
             return $"・Shorts制限: {FormatDuration(targetSeconds)}に短縮（末尾1秒フェードアウト + 無音除去）";
         }
@@ -1635,7 +1666,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void OpenSettings()
     {
-        var window = new SettingsWindow
+        var window = new SettingsWindow(environmentOnly: HasRestoredProject)
         {
             Owner = System.Windows.Application.Current.MainWindow
         };
@@ -1643,11 +1674,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var result = window.ShowDialog();
         if (result == true)
         {
-            foreach (var track in AudioTracks)
+            _isApplyingArchiveSettings = true;
+            try
             {
-                track.UpdateDefaultNormalizationTargets(SettingsService.Current.NormalizationTargetIntegratedLufs,
-                    SettingsService.Current.NormalizationTargetTruePeakDbtp);
+                foreach (var track in AudioTracks)
+                {
+                    track.UpdateDefaultNormalizationTargets(CurrentEncodingSettings.NormalizationTargetIntegratedLufs,
+                        CurrentEncodingSettings.NormalizationTargetTruePeakDbtp);
+                }
             }
+            finally { _isApplyingArchiveSettings = false; }
             OnPropertyChanged(nameof(EncodingSettingsText));
             UpdateSettingsLabels();
             UpdateValidation(true);
@@ -1666,12 +1702,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void OpenTextOverlayEditor()
     {
-        if (SettingsService.LoadError != null)
+        if (_jobSettings == null && SettingsService.LoadError != null)
         {
             StatusMessage = SettingsService.LoadError;
             return;
         }
-        var window = new TextOverlayJsonWindow(SettingsService.Current.TextOverlayLayoutJson)
+        var window = new TextOverlayJsonWindow(CurrentEncodingSettings.TextOverlayLayoutJson)
         {
             Owner = System.Windows.Application.Current.MainWindow
         };
@@ -1681,8 +1717,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        var current = SettingsService.Current;
-        SettingsService.Save(new AppSettings
+        var current = CurrentEncodingSettings;
+        var updated = new AppSettings
         {
             OutputDirectory = current.OutputDirectory,
             ArchiveDirectory = current.ArchiveDirectory,
@@ -1693,7 +1729,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
             NormalizationTargetIntegratedLufs = current.NormalizationTargetIntegratedLufs,
             NormalizationTargetTruePeakDbtp = current.NormalizationTargetTruePeakDbtp,
             TextOverlayLayoutJson = window.JsonText
-        });
+        };
+        if (_jobSettings == null) SettingsService.Save(updated);
+        else
+        {
+            _jobSettings = updated;
+            if (_restoredProject != null) _restoredProject.Settings.TextOverlayLayoutJson = window.JsonText;
+        }
 
         OnPropertyChanged(nameof(TextOverlayLayoutStatusText));
         UpdateValidation(true);
@@ -1713,13 +1755,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var audioSnapshot = AudioTracks.ToArray();
         var originalAudioPaths = audioSnapshot.Select(track => track.Path).ToArray();
         var originalImagePath = _imagePath;
-        var settings = SettingsService.Current;
+        var settings = CurrentEncodingSettings;
         var overlayJson = settings.TextOverlayLayoutJson;
         var overlayEnabled = profile == EncodeProfile.Standard && settings.NormalTextOverlayEnabled;
         var maxSeconds = settings.ShortsMaximumSeconds;
         var oneMinuteOffset = settings.OneMinuteShortsOffsetSeconds;
         var threeMinuteOffset = settings.ThreeMinuteShortsOffsetSeconds;
         var draftAudioQuality = _draftAudioQuality;
+        var archiveSnapshot = CaptureArchiveProject();
         if (orientation == null || audioSnapshot.Length == 0)
         {
             StatusMessage = "入力が不足しています";
@@ -1779,6 +1822,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
 
             var sourceImagePath = overlayEnabled ? imagePath : null;
+            var archivedImagePath = imagePath;
 
             if (overlayEnabled)
             {
@@ -1794,7 +1838,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 var configuration = overlayConfiguration;
                 var backgroundImagePath = imagePath!;
                 var generatedDirectoryPath = generatedImageDirectory;
-                var trackTitles = originalAudioPaths.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+                var trackTitles = audioSnapshot.Select(track => Path.GetFileNameWithoutExtension(track.FileName) ?? string.Empty).ToArray();
                 trackImagePaths = await TextOverlayService.CreateTrackImagesAsync(backgroundImagePath,
                     generatedDirectoryPath, trackTitles, configuration);
                 imagePath = trackImagePaths[0];
@@ -1809,10 +1853,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var archivedAudioPaths = new List<string>(originalAudioPaths.Length);
             for (var index = 0; index < originalAudioPaths.Length; index++)
             {
-                var archived = Path.Combine(archiveFolder, $"audio-{index:D2}-" + Path.GetFileName(originalAudioPaths[index]));
+                var archived = Path.Combine(archiveFolder, $"audio-{index:D2}-" + audioSnapshot[index].FileName);
                 File.Copy(originalAudioPaths[index], archived, overwrite: false);
                 archivedAudioPaths.Add(archived);
             }
+
+            archiveSnapshot.ImagePath = profile == EncodeProfile.DraftPreview ? null : Path.GetFileName(archivedImagePath);
+            for (var index = 0; index < archivedAudioPaths.Count; index++)
+                archiveSnapshot.Tracks[index].AudioPath = Path.GetFileName(archivedAudioPaths[index]);
+            ArchiveProjectService.Save(archiveFolder, archiveSnapshot);
 
             var outputFileName = OutputNamingService.BuildOutputFileName(title, timestamp, profile);
             var outputPath = Path.Combine(outputFolder, outputFileName);

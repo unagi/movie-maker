@@ -8,14 +8,18 @@ namespace MovieMaker.Views;
 public partial class TrackNormalizationWindow : Window
 {
     private readonly AudioTrackItem _track;
+    private readonly double _commonLufs;
+    private readonly double _commonTruePeak;
 
-    public TrackNormalizationWindow(AudioTrackItem track)
+    public TrackNormalizationWindow(AudioTrackItem track, double? commonLufs = null, double? commonTruePeak = null)
     {
         InitializeComponent();
         _track = track;
+        _commonLufs = commonLufs ?? SettingsService.Current.NormalizationTargetIntegratedLufs;
+        _commonTruePeak = commonTruePeak ?? SettingsService.Current.NormalizationTargetTruePeakDbtp;
         TrackNameText.Text = track.FileName;
-        CommonTargetRadio.Content = $"共通目標を使う（{SettingsService.Current.NormalizationTargetIntegratedLufs:0.###} LUFS / " +
-                                    $"{SettingsService.Current.NormalizationTargetTruePeakDbtp:0.###} dBTP）";
+        CommonTargetRadio.Content = $"共通目標を使う（{_commonLufs:0.###} LUFS / " +
+                                    $"{_commonTruePeak:0.###} dBTP）";
         CommonTargetRadio.IsChecked = !track.IsNormalizationOverrideEnabled;
         IndividualTargetRadio.IsChecked = track.IsNormalizationOverrideEnabled;
         LufsTextBox.Text = track.NormalizationTargetLufsText;
@@ -35,8 +39,7 @@ public partial class TrackNormalizationWindow : Window
         {
             _track.IsNormalizationOverrideEnabled = false;
             _track.UpdateDefaultNormalizationTargets(
-                SettingsService.Current.NormalizationTargetIntegratedLufs,
-                SettingsService.Current.NormalizationTargetTruePeakDbtp);
+                _commonLufs, _commonTruePeak);
             DialogResult = true;
             return;
         }

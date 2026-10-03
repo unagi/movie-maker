@@ -28,10 +28,11 @@ public sealed class AudioTrackItem : INotifyPropertyChanged
     private string _normalizationTargetLufsText;
     private string _normalizationTargetTruePeakText;
 
-    public AudioTrackItem(string path, double defaultTargetLufs = -14, double defaultTargetTruePeak = -1)
+    public AudioTrackItem(string path, double defaultTargetLufs = -14, double defaultTargetTruePeak = -1,
+        string? originalFileName = null)
     {
         Path = path;
-        FileName = System.IO.Path.GetFileName(path);
+        FileName = originalFileName ?? System.IO.Path.GetFileName(path);
         _normalizationTargetLufsText = defaultTargetLufs.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         _normalizationTargetTruePeakText = defaultTargetTruePeak.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
     }

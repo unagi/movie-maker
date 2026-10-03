@@ -133,7 +133,7 @@
           </Border>
           <StackPanel>
             <TextBlock Text="設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"/>
-            <TextBlock Text="出力先、アーカイブ、ノーマライズ、Shortsオフセット" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
+            <TextBlock x:Name="SettingsDescription" Text="出力先、アーカイブ、ノーマライズ、Shortsオフセット" FontSize="12" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
           </StackPanel>
         </StackPanel>
         <Button Grid.Column="1" Style="{StaticResource TitleBarButton}"
@@ -189,7 +189,7 @@
         </Grid>
       </Border>
 
-      <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+      <Border x:Name="NormalizationSettingsCard" Style="{StaticResource CardStyle}" Margin="0,0,0,12">
         <StackPanel>
           <TextBlock Text="通常モードのノーマライズ目標" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
           <TextBlock Text="全トラックに使う既定値です。必要なトラックだけ、メイン画面で個別に上書きできます。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,10"/>
@@ -210,7 +210,7 @@
         </StackPanel>
       </Border>
 
-      <Border Style="{StaticResource CardStyle}">
+      <Border x:Name="ShortsSettingsCard" Style="{StaticResource CardStyle}">
         <StackPanel>
           <TextBlock Text="Shortsオフセット秒" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
           <TextBlock Text="1分枠、3分枠から何秒安全側に引くかを設定します。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,12"/>
