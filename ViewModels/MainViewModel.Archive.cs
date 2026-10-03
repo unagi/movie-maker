@@ -71,7 +71,9 @@ public sealed partial class MainViewModel
         _restoredProject = null;
         _loadedArchiveDirectory = null;
         _restoredTracks.Clear();
+        _skipLoudnessNormalization = false;
         OnPropertyChanged(nameof(HasRestoredProject));
+        NotifyLoudnessPolicyChanged();
         OnPropertyChanged(nameof(NormalTextOverlayEnabled));
         OnPropertyChanged(nameof(TextOverlayLayoutStatusText));
         UpdateSettingsLabels();
@@ -117,17 +119,20 @@ public sealed partial class MainViewModel
 
             var currentPreset = EncodingOptionsResolver.Resolve(project.Orientation!.Value,
                 project.Profile!.Value, project.DraftAudioQuality ?? DraftAudioQuality.High);
+            var policyChanges = ArchiveProjectService.GetLegacyPolicyChanges(project);
             if (project.Preset != null && project.Preset != currentPreset ||
-                project.AppVersion != null && project.AppVersion != CurrentAppVersion)
+                project.AppVersion != null && project.AppVersion != CurrentAppVersion || policyChanges.Count > 0)
             {
                 var oldQuality = project.Preset == null ? "不明" :
                     $"{project.Preset.Width}x{project.Preset.Height} / {project.Preset.FrameRate}fps / " +
                     $"AAC {project.Preset.AudioBitrate} / {project.Preset.AudioSampleRate}Hz";
                 var newQuality = $"{currentPreset.Width}x{currentPreset.Height} / {currentPreset.FrameRate}fps / " +
                     $"AAC {currentPreset.AudioBitrate} / {currentPreset.AudioSampleRate}Hz";
-                if (!ConfirmArchiveAction($"作成時と現在のアプリ版または品質設定が異なります。\n" +
+                var policyText = policyChanges.Count == 0 ? string.Empty :
+                    "\n\n処理ポリシーの変更:\n・" + string.Join("\n・", policyChanges);
+                if (!ConfirmArchiveAction($"作成時と現在のアプリ版・品質設定または音量処理が異なります。\n" +
                         $"保存時: {project.AppVersion ?? "不明"} / {oldQuality}\n現在: {CurrentAppVersion} / {newQuality}\n" +
-                        "現在の処理で再エンコードする準備を進めますか？", "作成時との差を確認")) return;
+                        policyText + "\n\n現在の処理で再エンコードする準備を進めますか？", "作成時との差を確認")) return;
             }
             // Prepare all objects before replacing the current inputs.
             var settings = MaterializeJobSettings(project.Settings);
@@ -139,6 +144,7 @@ public sealed partial class MainViewModel
             _jobSettings = settings;
             _selectedProfile = project.UseDraftMode == true ? EncodeProfile.DraftPreview : EncodeProfile.Standard;
             _draftAudioQuality = project.DraftAudioQuality ?? DraftAudioQuality.High;
+            _skipLoudnessNormalization = project.Settings.SkipLoudnessNormalization;
             _imagePath = project.UseDraftMode == true ? null : loaded.ImageFullPath;
             ImagePreview = project.UseDraftMode == true ? null : image;
             _imageWidth = ImagePreview?.PixelWidth ?? 0;
@@ -160,6 +166,7 @@ public sealed partial class MainViewModel
             OnPropertyChanged(nameof(IsDraftAudioQualityHigh));
             OnPropertyChanged(nameof(IsDraftAudioQualityLow));
             OnPropertyChanged(nameof(NormalTextOverlayEnabled));
+            NotifyLoudnessPolicyChanged();
             UpdateAudioTrackPositions();
             UpdateAudioFileLabel();
             UpdateAspectInfo();
@@ -212,6 +219,14 @@ public sealed partial class MainViewModel
         };
     }
 
+    private void NotifyLoudnessPolicyChanged()
+    {
+        OnPropertyChanged(nameof(SkipLoudnessNormalization));
+        OnPropertyChanged(nameof(IsTrackNormalizationApplied));
+        OnPropertyChanged(nameof(CanOverrideLoudnessNormalization));
+        OnPropertyChanged(nameof(AudioLoudnessGuidanceText));
+    }
+
     private static AudioTrackItem CreateRestoredTrack(string path, ArchiveTrack saved, AppSettings settings)
     {
         var track = new AudioTrackItem(path, settings.NormalizationTargetIntegratedLufs,
@@ -262,9 +277,9 @@ public sealed partial class MainViewModel
                     OriginalFileName = track.FileName,
                     IsNormalizationOverrideEnabled = original == null || original.IsNormalizationOverrideEnabled != null
                         ? track.IsNormalizationOverrideEnabled : null,
-                    TargetIntegratedLufs = original == null || original.TargetIntegratedLufs != null || track.IsNormalizationOverrideEnabled
+                    TargetIntegratedLufs = original == null || original.TargetIntegratedLufs != null
                         ? ParseArchiveTarget(track.NormalizationTargetLufsText) : null,
-                    TargetTruePeakDbtp = original == null || original.TargetTruePeakDbtp != null || track.IsNormalizationOverrideEnabled
+                    TargetTruePeakDbtp = original == null || original.TargetTruePeakDbtp != null
                         ? ParseArchiveTarget(track.NormalizationTargetTruePeakText) : null
                 };
             }).ToList(),
@@ -276,7 +291,8 @@ public sealed partial class MainViewModel
                 NormalizationTargetIntegratedLufs = saved == null || saved.NormalizationTargetIntegratedLufs != null ? settings.NormalizationTargetIntegratedLufs : null,
                 NormalizationTargetTruePeakDbtp = saved == null || saved.NormalizationTargetTruePeakDbtp != null ? settings.NormalizationTargetTruePeakDbtp : null,
                 NormalTextOverlayEnabled = saved == null || saved.NormalTextOverlayEnabled != null ? settings.NormalTextOverlayEnabled : null,
-                TextOverlayLayoutJson = saved == null || saved.TextOverlayLayoutJson != null ? settings.TextOverlayLayoutJson : null
+                TextOverlayLayoutJson = saved == null || saved.TextOverlayLayoutJson != null ? settings.TextOverlayLayoutJson : null,
+                SkipLoudnessNormalization = _skipLoudnessNormalization
             },
             AppVersion = CurrentAppVersion,
             Preset = EncodingOptionsResolver.Resolve(GetEffectiveOrientation() ?? VideoOrientation.Horizontal,
@@ -300,6 +316,7 @@ public sealed partial class MainViewModel
             _jobSettings = MaterializeJobSettings(_restoredProject.Settings);
             _selectedProfile = _restoredProject.UseDraftMode == true ? EncodeProfile.DraftPreview : EncodeProfile.Standard;
             _draftAudioQuality = _restoredProject.DraftAudioQuality ?? _draftAudioQuality;
+            _skipLoudnessNormalization = _restoredProject.Settings.SkipLoudnessNormalization;
             _title = _restoredProject.Title!;
             _isApplyingArchiveSettings = true;
             try
@@ -320,6 +337,7 @@ public sealed partial class MainViewModel
             OnPropertyChanged(nameof(IsDraftAudioQualityHigh));
             OnPropertyChanged(nameof(IsDraftAudioQualityLow));
             OnPropertyChanged(nameof(NormalTextOverlayEnabled));
+            NotifyLoudnessPolicyChanged();
             NotifyStatusChanged();
             UpdateValidation(true);
         }

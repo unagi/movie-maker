@@ -27,7 +27,8 @@ public sealed record EncodeRequest(
     bool NormalTextOverlayEnabled = true,
     double OneMinuteShortsOffsetSeconds = 3,
     double ThreeMinuteShortsOffsetSeconds = 3,
-    string? SourceImagePath = null);
+    string? SourceImagePath = null,
+    bool SkipLoudnessNormalization = false);
 
 public sealed record EncodeResult(
     bool Success,
@@ -76,6 +77,10 @@ public sealed record LoudnessNormalizationTarget(double IntegratedLufs, double T
 
 public static class EncodingService
 {
+    public static bool ShouldApplyTrackNormalization(EncodeProfile profile, int audioTrackCount,
+        bool skipLoudnessNormalization) =>
+        profile == EncodeProfile.Standard && audioTrackCount >= 2 && !skipLoudnessNormalization;
+
     public static bool ValidateProductionInput(int imageWidth, int imageHeight, int audioCount,
         EncodeProfile profile, int maximumSeconds, double audioDurationSeconds, out string error)
     {
@@ -171,6 +176,15 @@ public static class EncodingService
             return new EncodeResult(false, request.OutputPath, request.LogPath, "ffmpegが見つかりません。", string.Empty);
         }
 
+        if (request.Profile == EncodeProfile.DraftPreview && request.Orientation != VideoOrientation.Horizontal)
+        {
+            return new EncodeResult(false, request.OutputPath, request.LogPath,
+                "仮動画は横向きでのみ出力できます。", string.Empty);
+        }
+
+        var applyTrackNormalization = ShouldApplyTrackNormalization(request.Profile,
+            request.AudioPaths.Count, request.SkipLoudnessNormalization);
+
         if (request.Profile == EncodeProfile.Standard && request.NormalTextOverlayEnabled &&
             (request.TrackImagePaths == null || request.TrackImagePaths.Count != request.AudioPaths.Count ||
              request.TrackImagePaths.Count == 0 || request.TrackImagePaths.Any(path => !File.Exists(path))))
@@ -192,7 +206,7 @@ public static class EncodingService
                 "文字入れなしの通常動画には共通画像1枚だけを指定してください。", string.Empty);
         }
 
-        if (request.Profile == EncodeProfile.Standard &&
+        if (applyTrackNormalization &&
             (request.TrackNormalizationTargets == null || request.TrackNormalizationTargets.Count != request.AudioPaths.Count ||
              request.TrackNormalizationTargets.Any(target => !AreValidNormalizationTargets(target.IntegratedLufs, target.TruePeakDbtp))))
         {
@@ -322,11 +336,13 @@ public static class EncodingService
                 return new EncodeResult(false, request.OutputPath, request.LogPath,
                     "音声トラックの長さを取得できませんでした。", string.Empty);
             }
-            var normalizationMeasurements = request.Profile == EncodeProfile.Standard
+            var applyTrackNormalization = ShouldApplyTrackNormalization(request.Profile,
+                request.AudioPaths.Count, request.SkipLoudnessNormalization);
+            var normalizationMeasurements = applyTrackNormalization
                 ? await GetNormalizationMeasurementsAsync(request.AudioPaths, request.FfmpegPath,
                     request.TrackNormalizationTargets!, logWriter, logLock)
                 : null;
-            if (request.Profile == EncodeProfile.Standard && normalizationMeasurements == null)
+            if (applyTrackNormalization && normalizationMeasurements == null)
             {
                 return new EncodeResult(false, request.OutputPath, request.LogPath,
                     "音声トラックのノーマライズ解析に失敗しました。入力音声とFFmpegログを確認してください。", string.Empty);
@@ -396,8 +412,12 @@ public static class EncodingService
             AddStandardTrackInputs(psi, request, segmentDurations, options);
             AddVideoEncoderArgs(psi, encoder, request);
             psi.ArgumentList.Add("-filter_complex");
-            psi.ArgumentList.Add(BuildStandardTrackFilter(segmentDurations, options, normalizationMeasurements!,
-                request.TrackNormalizationTargets!));
+            var applyTrackNormalization = ShouldApplyTrackNormalization(request.Profile,
+                request.AudioPaths.Count, request.SkipLoudnessNormalization);
+            psi.ArgumentList.Add(BuildStandardTrackFilter(segmentDurations, options,
+                applyTrackNormalization ? normalizationMeasurements : null,
+                applyTrackNormalization ? request.TrackNormalizationTargets : null,
+                applyTrackNormalization));
             psi.ArgumentList.Add("-map");
             psi.ArgumentList.Add("[vout]");
             psi.ArgumentList.Add("-map");
@@ -495,7 +515,8 @@ public static class EncodingService
     }
 
     private static string BuildStandardTrackFilter(IReadOnlyList<double> durations, EncodingOptions options,
-        IReadOnlyList<LoudnessNormalizationMeasurements> measurements, IReadOnlyList<LoudnessNormalizationTarget> targets)
+        IReadOnlyList<LoudnessNormalizationMeasurements>? measurements,
+        IReadOnlyList<LoudnessNormalizationTarget>? targets, bool applyNormalization)
     {
         var filters = new List<string>();
         var concatInputs = new StringBuilder();
@@ -507,15 +528,19 @@ public static class EncodingService
             filters.Add($"[{videoInput}:v]scale={options.Width}:{options.Height}:force_original_aspect_ratio=decrease," +
                 $"pad={options.Width}:{options.Height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1," +
                 $"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]");
-            var measured = measurements[index];
-            var target = targets[index];
-            var filterTruePeakTarget = GetFilterTruePeakTarget(target.TruePeakDbtp);
-            filters.Add($"[{audioInput}:a]atrim=duration={duration},asetpts=PTS-STARTPTS," +
-                $"loudnorm=I={FormatMetric(target.IntegratedLufs)}:TP={FormatMetric(filterTruePeakTarget)}:" +
-                $"LRA={FormatMetric(TargetLoudnessRangeLu)}:measured_I={FormatMetric(measured.IntegratedLufs)}:" +
-                $"measured_TP={FormatMetric(measured.TruePeakDbtp)}:measured_LRA={FormatMetric(measured.LoudnessRangeLu)}:" +
-                $"measured_thresh={FormatMetric(measured.ThresholdLufs)}:linear=true," +
-                $"aresample={options.AudioSampleRate},aformat=channel_layouts=stereo[a{index}]");
+            var audioFilter = $"[{audioInput}:a]atrim=duration={duration},asetpts=PTS-STARTPTS";
+            if (applyNormalization)
+            {
+                var measured = measurements![index];
+                var target = targets![index];
+                var filterTruePeakTarget = GetFilterTruePeakTarget(target.TruePeakDbtp);
+                audioFilter += $",loudnorm=I={FormatMetric(target.IntegratedLufs)}:TP={FormatMetric(filterTruePeakTarget)}:" +
+                    $"LRA={FormatMetric(TargetLoudnessRangeLu)}:measured_I={FormatMetric(measured.IntegratedLufs)}:" +
+                    $"measured_TP={FormatMetric(measured.TruePeakDbtp)}:measured_LRA={FormatMetric(measured.LoudnessRangeLu)}:" +
+                    $"measured_thresh={FormatMetric(measured.ThresholdLufs)}:linear=true";
+            }
+            audioFilter += $",aresample={options.AudioSampleRate},aformat=channel_layouts=stereo[a{index}]";
+            filters.Add(audioFilter);
             concatInputs.Append($"[v{index}][a{index}]");
         }
 

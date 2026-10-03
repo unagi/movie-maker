@@ -15,8 +15,8 @@ public static class EncodingOptionsResolver
         {
             var useHighAudio = draftAudioQuality == DraftAudioQuality.High;
             return new EncodingOptions(
-                isVertical ? 540 : 960,
-                isVertical ? 960 : 540,
+                960,
+                540,
                 24,
                 useHighAudio ? "256k" : "128k",
                 useHighAudio ? "44100" : "32000",
@@ -36,8 +36,8 @@ public static class EncodingOptionsResolver
                 isVertical ? 1080 : 1920,
                 isVertical ? 1920 : 1080,
                 30,
-                "128k",
-                "32000",
+                "320k",
+                "48000",
                 "medium",
                 18,
                 "p5",

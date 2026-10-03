@@ -8,6 +8,18 @@ namespace MovieMaker.Tests;
 
 public class EncodingServiceTests
 {
+    [Theory]
+    [InlineData(EncodeProfile.Standard, 1, false, false)]
+    [InlineData(EncodeProfile.Standard, 2, false, true)]
+    [InlineData(EncodeProfile.Standard, 3, true, false)]
+    [InlineData(EncodeProfile.CopyrightCheckProduction, 2, false, false)]
+    [InlineData(EncodeProfile.DraftPreview, 2, false, false)]
+    public void ShouldApplyTrackNormalization_UsesProfileCountAndSkipFlag(
+        EncodeProfile profile, int trackCount, bool skip, bool expected)
+    {
+        Assert.Equal(expected, EncodingService.ShouldApplyTrackNormalization(profile, trackCount, skip));
+    }
+
     [Fact]
     public void ValidateProductionInput_RejectsContradictoryImageDirection()
     {

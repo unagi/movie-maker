@@ -73,13 +73,14 @@ try {
         }
     })
     $project = [ordered]@{
-        format = 'movie-maker-project'; schemaVersion = 1; origin = 'archive-scan'
+        format = 'movie-maker-project'; schemaVersion = 2; origin = 'archive-scan'
         title = $null; useDraftMode = $null; profile = $null; orientation = $null; draftAudioQuality = $null
         imagePath = $images[0].Name; tracks = $tracks
         settings = [ordered]@{
             shortsMaximumSeconds = $null; oneMinuteShortsOffsetSeconds = $null; threeMinuteShortsOffsetSeconds = $null
             normalizationTargetIntegratedLufs = $null; normalizationTargetTruePeakDbtp = $null
             normalTextOverlayEnabled = $null; textOverlayLayoutJson = $layoutJson
+            skipLoudnessNormalization = $false
         }
         appVersion = $null; preset = $null
     }

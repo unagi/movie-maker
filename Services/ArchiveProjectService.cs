@@ -68,6 +68,7 @@ public static class ArchiveProjectService
 
     public static void Save(string directory, ArchiveProject project, bool overwrite = false)
     {
+        if (project.SchemaVersion != 2) throw new InvalidDataException("新しい復元用設定はSchema v2で保存してください。");
         Validate(project);
         Directory.CreateDirectory(directory);
         directory = CanonicalPath(directory);
@@ -116,12 +117,15 @@ public static class ArchiveProjectService
         if (project.Profile == EncodeProfile.Standard)
         {
             if (project.Orientation != VideoOrientation.Horizontal) missing.Add("通常モードは横画像");
-            if (!InRange(settings.NormalizationTargetIntegratedLufs, -70, -5)) missing.Add("共通LUFS（-70～-5）");
-            if (!InRange(settings.NormalizationTargetTruePeakDbtp, -8, 0)) missing.Add("共通True Peak（-8～0）");
             if (settings.NormalTextOverlayEnabled == null) missing.Add("文字合成の有効／無効");
             if (settings.NormalTextOverlayEnabled == true &&
                 (string.IsNullOrWhiteSpace(settings.TextOverlayLayoutJson) ||
                  !TextOverlayService.TryParse(settings.TextOverlayLayoutJson, out _, out _))) missing.Add("文字合成レイアウト");
+        }
+        if (ShouldApplyLoudnessNormalization(project))
+        {
+            if (!InRange(settings.NormalizationTargetIntegratedLufs, -70, -5)) missing.Add("共通LUFS（-70～-5）");
+            if (!InRange(settings.NormalizationTargetTruePeakDbtp, -8, 0)) missing.Add("共通True Peak（-8～0）");
             for (var index = 0; index < project.Tracks.Count; index++)
             {
                 var track = project.Tracks[index];
@@ -138,9 +142,25 @@ public static class ArchiveProjectService
         value is double number && double.IsFinite(number) && number >= minimum &&
         (exclusiveMaximum ? number < maximum : number <= maximum);
 
+    private static bool ShouldApplyLoudnessNormalization(ArchiveProject project) =>
+        project.UseDraftMode != true && project.Orientation == VideoOrientation.Horizontal &&
+        project.Profile.HasValue && EncodingService.ShouldApplyTrackNormalization(
+            project.Profile.Value, project.Tracks.Count, project.Settings.SkipLoudnessNormalization);
+
+    public static IReadOnlyList<string> GetLegacyPolicyChanges(ArchiveProject project)
+    {
+        if (project.SchemaVersion != 1) return Array.Empty<string>();
+        var changes = new List<string>();
+        if (project.Profile == EncodeProfile.CopyrightCheckProduction)
+            changes.Add("Shortsの音声は旧仕様の128 kbps / 32 kHzから、AAC 320 kbps / 48 kHzへ変更されます。");
+        if (project.Profile == EncodeProfile.Standard && project.Tracks.Count == 1)
+            changes.Add("通常1曲の音量調整は、旧仕様のありから現在のなしへ変更されます。");
+        return changes;
+    }
+
     private static void Validate(ArchiveProject project)
     {
-        if (project.Format != "movie-maker-project" || project.SchemaVersion != 1 ||
+        if (project.Format != "movie-maker-project" || project.SchemaVersion is not (1 or 2) ||
             project.Origin is not ("app" or "archive-scan")) throw new InvalidDataException("未対応の復元用設定です。");
         if (project.Settings == null || project.Tracks == null || project.Tracks.Count == 0 || project.Tracks.Any(track => track == null))
             throw new InvalidDataException("音声一覧または処理設定が不正です。");
@@ -176,14 +196,17 @@ public static class ArchiveProjectService
                 throw new InvalidDataException("Shorts設定値が範囲外です。");
             if (project.Profile == EncodeProfile.Standard)
             {
+                if (s.NormalTextOverlayEnabled == true && s.TextOverlayLayoutJson != null &&
+                    !TextOverlayService.TryParse(s.TextOverlayLayoutJson, out _, out var error)) throw new InvalidDataException(error);
+            }
+            if (ShouldApplyLoudnessNormalization(project))
+            {
                 if (s.NormalizationTargetIntegratedLufs.HasValue && !InRange(s.NormalizationTargetIntegratedLufs, -70, -5) ||
                     s.NormalizationTargetTruePeakDbtp.HasValue && !InRange(s.NormalizationTargetTruePeakDbtp, -8, 0))
                     throw new InvalidDataException("共通の音声目標値が範囲外です。");
                 foreach (var track in project.Tracks.Where(track => track.IsNormalizationOverrideEnabled == true))
                     if (track.TargetIntegratedLufs.HasValue && !InRange(track.TargetIntegratedLufs, -70, -5) ||
                         track.TargetTruePeakDbtp.HasValue && !InRange(track.TargetTruePeakDbtp, -8, 0)) throw new InvalidDataException("個別の音声目標値が範囲外です。");
-                if (s.NormalTextOverlayEnabled == true && s.TextOverlayLayoutJson != null &&
-                    !TextOverlayService.TryParse(s.TextOverlayLayoutJson, out _, out var error)) throw new InvalidDataException(error);
             }
         }
     }

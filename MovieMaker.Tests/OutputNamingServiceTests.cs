@@ -23,10 +23,10 @@ public class OutputNamingServiceTests
     }
 
     [Fact]
-    public void CopyrightCheckProduction_AddsCheckPrefixToOutputFileName()
+    public void Shorts_KeepsOriginalOutputFileName()
     {
         var fileName = OutputNamingService.BuildOutputFileName("sample", "20260321_120000", EncodeProfile.CopyrightCheckProduction);
 
-        Assert.Equal("light-audio_sample_20260321_120000.mp4", fileName);
+        Assert.Equal("sample_20260321_120000.mp4", fileName);
     }
 }

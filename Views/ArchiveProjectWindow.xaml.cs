@@ -32,7 +32,7 @@ public partial class ArchiveProjectWindow : Window
         OverlayEnabledCheckBox.IsChecked = project.Settings.NormalTextOverlayEnabled ?? currentDefaults.NormalTextOverlayEnabled;
         DraftHighRadio.IsChecked = project.DraftAudioQuality != DraftAudioQuality.Low;
         DraftLowRadio.IsChecked = project.DraftAudioQuality == DraftAudioQuality.Low;
-        ConfirmUnknownTracksCheckBox.Visibility = project.Tracks.Any(IsUnknownTrack) ? Visibility.Visible : Visibility.Collapsed;
+        SkipLoudnessNormalizationCheckBox.IsChecked = project.Settings.SkipLoudnessNormalization;
         _initialized = true;
         UpdateModePanels();
     }
@@ -41,6 +41,8 @@ public partial class ArchiveProjectWindow : Window
     private static bool IsUnknownTrack(ArchiveTrack track) => track.IsNormalizationOverrideEnabled == null ||
         track.IsNormalizationOverrideEnabled == true && (track.TargetIntegratedLufs == null || track.TargetTruePeakDbtp == null);
     private bool IsStandard => DraftModeRadio.IsChecked != true && _imageOrientation == VideoOrientation.Horizontal;
+    private bool CanApplyLoudnessNormalization => IsStandard && EncodingService.ShouldApplyTrackNormalization(
+        EncodeProfile.Standard, _project.Tracks.Count, SkipLoudnessNormalizationCheckBox.IsChecked == true);
 
     private void Mode_OnChanged(object sender, RoutedEventArgs e)
     {
@@ -51,6 +53,11 @@ public partial class ArchiveProjectWindow : Window
     {
         var draft = DraftModeRadio.IsChecked == true;
         ImageSettingsPanel.Visibility = IsStandard ? Visibility.Visible : Visibility.Collapsed;
+        SkipLoudnessNormalizationCheckBox.Visibility = IsStandard && _project.Tracks.Count >= 2
+            ? Visibility.Visible : Visibility.Collapsed;
+        NormalizationSettingsPanel.Visibility = CanApplyLoudnessNormalization ? Visibility.Visible : Visibility.Collapsed;
+        ConfirmUnknownTracksCheckBox.Visibility = CanApplyLoudnessNormalization && _project.Tracks.Any(IsUnknownTrack)
+            ? Visibility.Visible : Visibility.Collapsed;
         DraftSettingsPanel.Visibility = draft ? Visibility.Visible : Visibility.Collapsed;
         ShortsSettingsPanel.Visibility = draft ? Visibility.Collapsed : Visibility.Visible;
         OrientationText.Text = draft ? "横画像を自動生成します。" : _imageOrientation switch
@@ -95,13 +102,21 @@ public partial class ArchiveProjectWindow : Window
                 project.Settings.ThreeMinuteShortsOffsetSeconds = Parse(ThreeMinuteOffsetTextBox.Text);
                 if (IsStandard)
                 {
-                    if (project.Tracks.Any(IsUnknownTrack) && ConfirmUnknownTracksCheckBox.IsChecked != true)
-                        throw new InvalidDataException("個別設定の記録がない音声の目標を確認してください。");
-                    project.Settings.NormalizationTargetIntegratedLufs = Parse(LufsTextBox.Text);
-                    project.Settings.NormalizationTargetTruePeakDbtp = Parse(TruePeakTextBox.Text);
+                    var canEditNormalizationPolicy = project.Tracks.Count >= 2;
+                    var applyLoudnessNormalization = EncodingService.ShouldApplyTrackNormalization(
+                        EncodeProfile.Standard, project.Tracks.Count, SkipLoudnessNormalizationCheckBox.IsChecked == true);
+                    if (canEditNormalizationPolicy)
+                        project.Settings.SkipLoudnessNormalization = SkipLoudnessNormalizationCheckBox.IsChecked == true;
+                    if (applyLoudnessNormalization)
+                    {
+                        if (project.Tracks.Any(IsUnknownTrack) && ConfirmUnknownTracksCheckBox.IsChecked != true)
+                            throw new InvalidDataException("個別設定の記録がない音声の目標を確認してください。");
+                        project.Settings.NormalizationTargetIntegratedLufs = Parse(LufsTextBox.Text);
+                        project.Settings.NormalizationTargetTruePeakDbtp = Parse(TruePeakTextBox.Text);
+                    }
                     project.Settings.NormalTextOverlayEnabled = OverlayEnabledCheckBox.IsChecked == true;
                     if (project.Settings.NormalTextOverlayEnabled == true) project.Settings.TextOverlayLayoutJson = _layoutJson;
-                    foreach (var track in project.Tracks.Where(IsUnknownTrack))
+                    foreach (var track in project.Tracks.Where(IsUnknownTrack).Where(_ => applyLoudnessNormalization))
                     {
                         track.IsNormalizationOverrideEnabled = false;
                         track.TargetIntegratedLufs = null;

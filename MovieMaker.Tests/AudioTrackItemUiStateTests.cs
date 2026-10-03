@@ -79,6 +79,8 @@ public sealed class AudioTrackItemUiStateTests
     public void Guidance_DescribesProcessingForEachOutputModeWithoutGenericWarning()
     {
         var viewModel = new MainViewModel();
+        viewModel.AudioTracks.Add(new AudioTrackItem("one.wav"));
+        viewModel.AudioTracks.Add(new AudioTrackItem("two.wav"));
         Assert.Contains("出力時", viewModel.AudioLoudnessGuidanceText, StringComparison.Ordinal);
         Assert.Contains("各曲", viewModel.AudioLoudnessGuidanceText, StringComparison.Ordinal);
         Assert.DoesNotContain("注意", viewModel.AudioLoudnessGuidanceText, StringComparison.Ordinal);

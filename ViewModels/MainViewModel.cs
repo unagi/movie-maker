@@ -63,6 +63,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private bool _isApplyingAutoTitle;
     private EncodeProfile _selectedProfile = EncodeProfile.Standard;
     private DraftAudioQuality _draftAudioQuality = DraftAudioQuality.High;
+    private bool _skipLoudnessNormalization;
 
     private int _imageWidth;
     private int _imageHeight;
@@ -242,9 +243,32 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public bool HasAudioLoudnessWarning => AudioTracks.Any(track =>
         track.IsLoudnessWarning || track.IsTruePeakWarning);
 
-    public string AudioLoudnessGuidanceText => SelectedProfile == EncodeProfile.Standard
-        ? "通常動画は出力時に各曲を目標値へ調整します。"
-        : "仮動画・Shortsは音量調整なしで出力します。";
+    public bool SkipLoudnessNormalization
+    {
+        get => _skipLoudnessNormalization;
+        set
+        {
+            if (IsEncoding || _skipLoudnessNormalization == value) return;
+            _skipLoudnessNormalization = value;
+            NotifyStatusChanged();
+            UpdateValidation(true);
+        }
+    }
+
+    public bool CanOverrideLoudnessNormalization => IsNormalOutput && AudioTracks.Count >= 2;
+
+    public bool IsTrackNormalizationApplied => EncodingService.ShouldApplyTrackNormalization(
+        SelectedProfile, AudioTracks.Count, SkipLoudnessNormalization);
+
+    public string AudioLoudnessGuidanceText => SelectedProfile switch
+    {
+        EncodeProfile.DraftPreview => "仮動画は音量調整なしで出力します。",
+        EncodeProfile.CopyrightCheckProduction => "Shortsは1トラック・高音質で、音量調整なしで出力します。",
+        _ when IsTrackNormalizationApplied => "通常動画は出力時に各曲を目標値へ調整します。",
+        _ when AudioTracks.Count == 1 => "単一トラックの通常動画は音量調整なしで出力します。",
+        _ when AudioTracks.Count >= 2 => "この動画はラウドネス調整OFFのため、音量調整なしで出力します。",
+        _ => "通常動画は2トラック以上の場合に各曲を目標値へ調整します。"
+    };
 
     public string ImageFileLabel
     {
@@ -463,9 +487,10 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     public VideoOrientation DraftOrientation
     {
-        get => _draftOrientation;
+        get => VideoOrientation.Horizontal;
         set
         {
+            value = VideoOrientation.Horizontal;
             if (_draftOrientation == value) return;
             _draftOrientation = value;
             OnPropertyChanged();
@@ -666,7 +691,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 "出力制御"
             };
 
-            if (IsNormalOutput)
+            if (IsTrackNormalizationApplied)
             {
                 var settings = CurrentEncodingSettings;
                 var overrideCount = AudioTracks.Count(track => track.IsNormalizationOverrideEnabled);
@@ -674,8 +699,12 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                     $"・ノーマライズ: 既定 {settings.NormalizationTargetIntegratedLufs:0.###} LUFS / " +
                     $"{settings.NormalizationTargetTruePeakDbtp:0.###} dBTP、個別上書き {overrideCount}件（AAC変換用に1 dB余裕）");
             }
+            else
+            {
+                lines.Insert(lines.IndexOf("出力制御"), $"・ラウドネス調整: なし（{AudioLoudnessGuidanceText}）");
+            }
 
-            if ((GetEffectiveOrientation() ?? DraftOrientation) == VideoOrientation.Vertical)
+            if (GetSelectedProfile() == EncodeProfile.CopyrightCheckProduction)
             {
                 if (_audioDurationSeconds.HasValue)
                 {
@@ -688,7 +717,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             }
             else
             {
-                lines.Add("・Shorts制限: 対象外（横動画）");
+                lines.Add("・Shorts制限: 対象外");
             }
 
             lines.Add("・終了条件: -shortest（短い入力長に合わせる）");
@@ -1202,7 +1231,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         {
             if (AudioTracks.Any(track => track.IsDurationAnalysisFailed))
                 errors.Add("復元した音声の長さを解析できませんでした。素材を確認してください");
-            else if (AudioTracks.Any(track => !track.DurationSeconds.HasValue || !track.IsLoudnessAnalysisComplete))
+            else if (AudioTracks.Any(track => !track.DurationSeconds.HasValue ||
+                IsTrackNormalizationApplied && !track.IsLoudnessAnalysisComplete))
                 errors.Add("復元した音声を解析しています");
         }
         var title = Title?.Trim() ?? string.Empty;
@@ -1243,7 +1273,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                     ? "文字入れJSONを設定してください"
                     : $"文字入れJSONを確認してください: {overlayError}");
             }
-            if (IsNormalOutput && AudioTracks.Any(track => !track.NormalizationTargetsValid))
+            if (IsTrackNormalizationApplied && AudioTracks.Any(track =>
+                !TryParseTrackNormalizationTargets(track, out _, out _)))
             {
                 errors.Add("音声トラックのノーマライズ目標値を確認してください");
             }
@@ -1298,6 +1329,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(AudioQueueSummaryText));
         OnPropertyChanged(nameof(HasAudioLoudnessWarning));
         OnPropertyChanged(nameof(AudioLoudnessGuidanceText));
+        OnPropertyChanged(nameof(SkipLoudnessNormalization));
+        OnPropertyChanged(nameof(CanOverrideLoudnessNormalization));
+        OnPropertyChanged(nameof(IsTrackNormalizationApplied));
         OnPropertyChanged(nameof(HasNoAudioTracks));
         OnPropertyChanged(nameof(IsOutputReady));
         OnPropertyChanged(nameof(SelectedProfile));
@@ -1389,7 +1423,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         return profile switch
         {
             EncodeProfile.Standard => "通常出力",
-            EncodeProfile.CopyrightCheckProduction => "本番画質・軽量音声 (本番解像度 / AAC 128kbps / 32kHz)",
+            EncodeProfile.CopyrightCheckProduction => "Shorts (本番画質 / AAC 320kbps / 48kHz)",
             EncodeProfile.DraftPreview => "仮動画 (仮画像 / 軽量画質 / 音質切替可)",
             _ => "不明"
         };
@@ -1400,7 +1434,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         var baseLabel = orientation == VideoOrientation.Vertical ? "YouTube Short" : "YouTube";
         return GetSelectedProfile() switch
         {
-            EncodeProfile.CopyrightCheckProduction => $"本番画質・軽量音声 ({baseLabel})",
+            EncodeProfile.CopyrightCheckProduction => $"Shorts ({baseLabel})",
             EncodeProfile.DraftPreview => $"仮動画 ({baseLabel})",
             _ => baseLabel
         };
@@ -1762,6 +1796,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         var oneMinuteOffset = settings.OneMinuteShortsOffsetSeconds;
         var threeMinuteOffset = settings.ThreeMinuteShortsOffsetSeconds;
         var draftAudioQuality = _draftAudioQuality;
+        var skipLoudnessNormalization = SkipLoudnessNormalization;
         var archiveSnapshot = CaptureArchiveProject();
         if (orientation == null || audioSnapshot.Length == 0)
         {
@@ -1780,7 +1815,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         IReadOnlyList<string>? trackImagePaths = null;
         try
         {
-            var normalizationTargets = profile == EncodeProfile.Standard
+            var normalizationTargets = EncodingService.ShouldApplyTrackNormalization(
+                profile, audioSnapshot.Length, skipLoudnessNormalization)
                 ? audioSnapshot.Select(track =>
                 {
                     if (!TryParseTrackNormalizationTargets(track, out var lufs, out var peak))
@@ -1881,7 +1917,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 overlayEnabled,
                 oneMinuteOffset,
                 threeMinuteOffset,
-                SourceImagePath: sourceImagePath);
+                SourceImagePath: sourceImagePath,
+                SkipLoudnessNormalization: skipLoudnessNormalization);
 
             var result = await EncodingService.EncodeAsync(request);
 

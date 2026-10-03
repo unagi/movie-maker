@@ -20,11 +20,15 @@
                 </StackPanel>
                 <TextBlock x:Name="OrientationText" Margin="0,8,0,12"/>
                 <StackPanel x:Name="ImageSettingsPanel">
-                    <TextBlock Text="共通LUFS（-70～-5）"/><TextBox x:Name="LufsTextBox"/>
-                    <TextBlock Text="共通True Peak（-8～0 dBTP）"/><TextBox x:Name="TruePeakTextBox"/>
+                    <CheckBox x:Name="SkipLoudnessNormalizationCheckBox" Content="この動画では音量調整をしない"
+                              Checked="Mode_OnChanged" Unchecked="Mode_OnChanged" Margin="0,0,0,10"/>
+                    <StackPanel x:Name="NormalizationSettingsPanel">
+                        <TextBlock Text="共通LUFS（-70～-5）"/><TextBox x:Name="LufsTextBox"/>
+                        <TextBlock Text="共通True Peak（-8～0 dBTP）"/><TextBox x:Name="TruePeakTextBox"/>
+                        <CheckBox x:Name="ConfirmUnknownTracksCheckBox" Content="個別設定の記録がない音声は、今回は共通目標を使う"/>
+                    </StackPanel>
                     <CheckBox x:Name="OverlayEnabledCheckBox" Content="通常モードで文字を合成する" Checked="Mode_OnChanged" Unchecked="Mode_OnChanged"/>
                     <Button x:Name="EditLayoutButton" Content="文字合成レイアウト" HorizontalAlignment="Left" Margin="0,8,0,12" Click="EditLayout_OnClick"/>
-                    <CheckBox x:Name="ConfirmUnknownTracksCheckBox" Content="個別設定の記録がない音声は、今回は共通目標を使う"/>
                 </StackPanel>
                 <StackPanel x:Name="DraftSettingsPanel" Margin="0,0,0,12">
                     <TextBlock Text="Draftの音声品質" Margin="0,0,0,6"/>

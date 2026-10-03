@@ -16,19 +16,27 @@ public sealed class EncodingServiceIntegrationTests
         var ffmpeg = EncodingService.ResolveFfmpegPath();
         Assert.NotNull(ffmpeg);
         using var workspace = new Workspace();
-        var audio = await workspace.CreateAudioAsync(ffmpeg!, "audio.wav", 1.5);
+        var audio = await workspace.CreateFlacAudioAsync(ffmpeg!, "audio.flac", 4.0);
         var image = workspace.CreateImage("portrait.png", 90, 160);
         var output = Path.Combine(workspace.Root, "short.mp4");
         var request = new EncodeRequest(ffmpeg, image, [audio], output,
             VideoOrientation.Vertical, EncodeProfile.CopyrightCheckProduction,
             Path.Combine(workspace.Root, "short.log"), DraftAudioQuality.High,
-            ShortsMaximumSeconds: 4, NormalTextOverlayEnabled: false);
+            ShortsMaximumSeconds: 10, NormalTextOverlayEnabled: false);
 
         var result = await EncodingService.EncodeAsync(request);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.True(File.Exists(output));
-        Assert.Equal(32000, (await EncodingService.GetAudioInfoAsync(output, ffmpeg))?.SampleRate);
+        var outputAudio = await EncodingService.GetAudioInfoAsync(output, ffmpeg);
+        Assert.Equal("aac", outputAudio?.CodecName);
+        Assert.Equal(48000, outputAudio?.SampleRate);
+        var sourceLoudness = await EncodingService.GetAudioLoudnessAsync(audio, ffmpeg);
+        var outputLoudness = await EncodingService.GetAudioLoudnessAsync(output, ffmpeg);
+        Assert.NotNull(sourceLoudness);
+        Assert.NotNull(outputLoudness);
+        Assert.InRange(Math.Abs(outputLoudness!.IntegratedLufs - sourceLoudness!.IntegratedLufs), 0, 1.5);
+        Assert.DoesNotContain("Loudness normalization input:", await File.ReadAllTextAsync(request.LogPath));
         Assert.Empty(Directory.EnumerateFileSystemEntries(workspace.Root, ".movie-maker-*"));
     }
 
@@ -101,6 +109,138 @@ public sealed class EncodingServiceIntegrationTests
     }
 
     [Fact]
+    public async Task NormalSingleTrack_DoesNotRequireNormalizationTargets()
+    {
+        var ffmpeg = EncodingService.ResolveFfmpegPath();
+        Assert.NotNull(ffmpeg);
+        using var workspace = new Workspace();
+        var audio = await workspace.CreateAudioAsync(ffmpeg!, "audio.wav", 1.5);
+        var image = workspace.CreateImage("square.png", 90, 90);
+        var output = Path.Combine(workspace.Root, "normal-single.mp4");
+        var request = new EncodeRequest(ffmpeg, image, [audio], output,
+            VideoOrientation.Horizontal, EncodeProfile.Standard,
+            Path.Combine(workspace.Root, "normal-single.log"), DraftAudioQuality.High,
+            NormalTextOverlayEnabled: false);
+
+        var result = await EncodingService.EncodeAsync(request);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(48000, (await EncodingService.GetAudioInfoAsync(output, ffmpeg))?.SampleRate);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace.Root, ".movie-maker-*"));
+    }
+
+    [Fact]
+    public async Task NormalMultipleTracks_NormalizationChangesLoudnessAndCanBeSkipped()
+    {
+        var ffmpeg = EncodingService.ResolveFfmpegPath();
+        Assert.NotNull(ffmpeg);
+        using var workspace = new Workspace();
+        var firstAudio = await workspace.CreateAudioAsync(ffmpeg!, "first.wav", 4.0);
+        var secondAudio = await workspace.CreateAudioAsync(ffmpeg!, "second.wav", 4.0);
+        var image = workspace.CreateImage("landscape.png", 160, 90);
+        var normalizedOutput = Path.Combine(workspace.Root, "normal-multiple-normalized.mp4");
+        var normalizedRequest = new EncodeRequest(ffmpeg, image, [firstAudio, secondAudio], normalizedOutput,
+            VideoOrientation.Horizontal, EncodeProfile.Standard,
+            Path.Combine(workspace.Root, "normal-multiple-normalized.log"), DraftAudioQuality.High,
+            TrackNormalizationTargets: [new LoudnessNormalizationTarget(-14, -1),
+                new LoudnessNormalizationTarget(-14, -1)],
+            NormalTextOverlayEnabled: false);
+        var unnormalizedOutput = Path.Combine(workspace.Root, "normal-multiple-unnormalized.mp4");
+        var unnormalizedRequest = new EncodeRequest(ffmpeg, image, [firstAudio, secondAudio], unnormalizedOutput,
+            VideoOrientation.Horizontal, EncodeProfile.Standard,
+            Path.Combine(workspace.Root, "normal-multiple-unnormalized.log"), DraftAudioQuality.High,
+            NormalTextOverlayEnabled: false,
+            SkipLoudnessNormalization: true);
+
+        var sourceLoudness = await EncodingService.GetAudioLoudnessAsync(firstAudio, ffmpeg);
+        Assert.NotNull(sourceLoudness);
+        var normalizedResult = await EncodingService.EncodeAsync(normalizedRequest);
+        var unnormalizedResult = await EncodingService.EncodeAsync(unnormalizedRequest);
+
+        Assert.True(normalizedResult.Success, normalizedResult.ErrorMessage);
+        Assert.True(unnormalizedResult.Success, unnormalizedResult.ErrorMessage);
+        var normalizedAudio = await EncodingService.GetAudioInfoAsync(normalizedOutput, ffmpeg);
+        var unnormalizedAudio = await EncodingService.GetAudioInfoAsync(unnormalizedOutput, ffmpeg);
+        Assert.Equal(48000, normalizedAudio?.SampleRate);
+        Assert.Equal(48000, unnormalizedAudio?.SampleRate);
+        Assert.InRange(normalizedAudio!.DurationSeconds!.Value, 7.8, 8.2);
+        Assert.InRange(unnormalizedAudio!.DurationSeconds!.Value, 7.8, 8.2);
+        var normalizedLoudness = await EncodingService.GetAudioLoudnessAsync(normalizedOutput, ffmpeg);
+        var unnormalizedLoudness = await EncodingService.GetAudioLoudnessAsync(unnormalizedOutput, ffmpeg);
+        Assert.NotNull(normalizedLoudness);
+        Assert.NotNull(unnormalizedLoudness);
+        Assert.InRange(Math.Abs(normalizedLoudness!.IntegratedLufs - (-14.0)), 0, 0.5);
+        Assert.InRange(Math.Abs(unnormalizedLoudness!.IntegratedLufs - sourceLoudness!.IntegratedLufs), 0, 1.5);
+        Assert.True(Math.Abs(unnormalizedLoudness.IntegratedLufs - (-14.0)) > 3.0);
+        Assert.Contains("Loudness normalization input:",
+            await File.ReadAllTextAsync(normalizedRequest.LogPath));
+        Assert.DoesNotContain("Loudness normalization input:",
+            await File.ReadAllTextAsync(unnormalizedRequest.LogPath));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace.Root, ".movie-maker-*"));
+    }
+
+    [Fact]
+    public async Task NormalMultipleTracks_SkipNormalizationAllowsSilentTrackWithoutTargets()
+    {
+        var ffmpeg = EncodingService.ResolveFfmpegPath();
+        Assert.NotNull(ffmpeg);
+        using var workspace = new Workspace();
+        var silentAudio = await workspace.CreateSilenceAudioAsync(ffmpeg!, "silent.wav", 1.0);
+        var secondAudio = await workspace.CreateAudioAsync(ffmpeg!, "second.wav", 1.0);
+        var image = workspace.CreateImage("landscape.png", 160, 90);
+        var output = Path.Combine(workspace.Root, "normal-no-normalization.mp4");
+        var request = new EncodeRequest(ffmpeg, image, [silentAudio, secondAudio], output,
+            VideoOrientation.Horizontal, EncodeProfile.Standard,
+            Path.Combine(workspace.Root, "normal-no-normalization.log"), DraftAudioQuality.High,
+            NormalTextOverlayEnabled: false,
+            SkipLoudnessNormalization: true);
+
+        var result = await EncodingService.EncodeAsync(request);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var outputAudio = await EncodingService.GetAudioInfoAsync(output, ffmpeg);
+        Assert.Equal(48000, outputAudio?.SampleRate);
+        Assert.InRange(outputAudio!.DurationSeconds!.Value, 1.9, 2.2);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace.Root, ".movie-maker-*"));
+    }
+
+    [Fact]
+    public async Task NormalMultipleTracks_InvalidTargetsFailOnlyWhenNormalizationIsEnabled()
+    {
+        var ffmpeg = EncodingService.ResolveFfmpegPath();
+        Assert.NotNull(ffmpeg);
+        using var workspace = new Workspace();
+        var firstAudio = await workspace.CreateAudioAsync(ffmpeg!, "first.wav", 1.0);
+        var secondAudio = await workspace.CreateAudioAsync(ffmpeg!, "second.wav", 1.0);
+        var image = workspace.CreateImage("landscape.png", 160, 90);
+        var invalidTargets = new[]
+        {
+            new LoudnessNormalizationTarget(-14, -1),
+            new LoudnessNormalizationTarget(1, -1)
+        };
+        var rejectedRequest = new EncodeRequest(ffmpeg, image, [firstAudio, secondAudio],
+            Path.Combine(workspace.Root, "invalid-targets.mp4"), VideoOrientation.Horizontal,
+            EncodeProfile.Standard, Path.Combine(workspace.Root, "invalid-targets.log"), DraftAudioQuality.High,
+            TrackNormalizationTargets: invalidTargets, NormalTextOverlayEnabled: false);
+
+        var rejected = await EncodingService.EncodeAsync(rejectedRequest);
+
+        Assert.False(rejected.Success);
+        Assert.Contains("ノーマライズ目標値", rejected.ErrorMessage);
+
+        var skippedRequest = rejectedRequest with
+        {
+            OutputPath = Path.Combine(workspace.Root, "invalid-targets-skipped.mp4"),
+            LogPath = Path.Combine(workspace.Root, "invalid-targets-skipped.log"),
+            SkipLoudnessNormalization = true
+        };
+        var skipped = await EncodingService.EncodeAsync(skippedRequest);
+
+        Assert.True(skipped.Success, skipped.ErrorMessage);
+        Assert.True(File.Exists(skippedRequest.OutputPath));
+    }
+
+    [Fact]
     public async Task NormalOverlay_RejectsPortraitReplacementOfRegisteredBackground()
     {
         var ffmpeg = EncodingService.ResolveFfmpegPath();
@@ -150,6 +290,27 @@ public sealed class EncodingServiceIntegrationTests
         Assert.Empty(Directory.EnumerateFileSystemEntries(workspace.Root, ".movie-maker-*"));
     }
 
+    [Fact]
+    public async Task Draft_RejectsVerticalOrientation()
+    {
+        var ffmpeg = EncodingService.ResolveFfmpegPath();
+        Assert.NotNull(ffmpeg);
+        using var workspace = new Workspace();
+        var audio = await workspace.CreateAudioAsync(ffmpeg!, "audio.wav", 1.5);
+        var image = workspace.CreateImage("portrait.png", 90, 160);
+        var output = Path.Combine(workspace.Root, "draft-vertical.mp4");
+        var request = new EncodeRequest(ffmpeg, image, [audio], output,
+            VideoOrientation.Vertical, EncodeProfile.DraftPreview,
+            Path.Combine(workspace.Root, "draft-vertical.log"), DraftAudioQuality.High,
+            NormalTextOverlayEnabled: false);
+
+        var result = await EncodingService.EncodeAsync(request);
+
+        Assert.False(result.Success);
+        Assert.Contains("横向き", result.ErrorMessage);
+        Assert.False(File.Exists(output));
+    }
+
     private sealed class Workspace : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "MovieMakerEncodingTests", Guid.NewGuid().ToString("N"));
@@ -178,6 +339,48 @@ public sealed class EncodingServiceIntegrationTests
             };
             foreach (var argument in new[] { "-y", "-f", "lavfi", "-i",
                          $"sine=frequency=440:duration={duration.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                         "-c:a", "pcm_s16le", path })
+                psi.ArgumentList.Add(argument);
+            using var process = Process.Start(psi)!;
+            var stderr = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            Assert.True(process.ExitCode == 0, await stderr);
+            return path;
+        }
+
+        public async Task<string> CreateFlacAudioAsync(string ffmpeg, string name, double duration)
+        {
+            var path = Path.Combine(Root, name);
+            var psi = new ProcessStartInfo(ffmpeg)
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true
+            };
+            foreach (var argument in new[] { "-y", "-f", "lavfi", "-i",
+                         $"sine=frequency=440:duration={duration.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                         "-ar", "48000", "-c:a", "flac", path })
+                psi.ArgumentList.Add(argument);
+            using var process = Process.Start(psi)!;
+            var stderr = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            Assert.True(process.ExitCode == 0, await stderr);
+            return path;
+        }
+
+        public async Task<string> CreateSilenceAudioAsync(string ffmpeg, string name, double duration)
+        {
+            var path = Path.Combine(Root, name);
+            var psi = new ProcessStartInfo(ffmpeg)
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true
+            };
+            foreach (var argument in new[] { "-y", "-f", "lavfi", "-i",
+                         $"anullsrc=r=48000:cl=stereo:d={duration.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                          "-c:a", "pcm_s16le", path })
                 psi.ArgumentList.Add(argument);
             using var process = Process.Start(psi)!;

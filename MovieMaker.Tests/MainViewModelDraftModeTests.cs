@@ -108,7 +108,10 @@ public class MainViewModelDraftModeTests
         SetPrivateField(viewModel, "_imageHeight", 1920);
         SetPrivateField(viewModel, "_orientation", VideoOrientation.Vertical);
 
-        Assert.True(viewModel.EncodingSettingsText.Contains("本番画質・軽量音声", StringComparison.Ordinal));
+        Assert.Contains("Shorts", viewModel.EncodingSettingsText, StringComparison.Ordinal);
+        Assert.DoesNotContain("軽量音声", viewModel.EncodingSettingsText, StringComparison.Ordinal);
+        Assert.Contains("320k", viewModel.EncodingSettingsText, StringComparison.Ordinal);
+        Assert.Contains("48 kHz", viewModel.EncodingSettingsText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -608,7 +611,7 @@ public class MainViewModelDraftModeTests
 
         Assert.Contains(nameof(MainViewModel.OutputStatusText), changedProperties);
         Assert.Contains(nameof(MainViewModel.EncodingSettingsText), changedProperties);
-        Assert.Equal("本番画質・軽量音声 (YouTube Short) (0:55)", viewModel.OutputStatusText);
+        Assert.Equal("Shorts (YouTube Short) (0:55)", viewModel.OutputStatusText);
 
         changedProperties.Clear();
         SetPrivateField(viewModel, "_imageWidth", 1920);
@@ -619,6 +622,144 @@ public class MainViewModelDraftModeTests
         Assert.Contains(nameof(MainViewModel.OutputStatusText), changedProperties);
         Assert.Contains(nameof(MainViewModel.EncodingSettingsText), changedProperties);
         Assert.Equal("YouTube (0:58)", viewModel.OutputStatusText);
+    }
+
+    [Fact]
+    public void StandardSingleTrack_DoesNotRequireNormalizationTargets()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        SettingsService.Current.NormalTextOverlayEnabled = false;
+        var viewModel = new MainViewModel { Title = "single-track" };
+        viewModel.HandleDrop([temp.CreateImage("landscape.png", 160, 90)]);
+        var track = new AudioTrackItem(temp.CreateFile("single.wav"))
+        {
+            IsNormalizationOverrideEnabled = true,
+            NormalizationTargetLufsText = "invalid",
+            NormalizationTargetTruePeakText = "invalid"
+        };
+        track.ApplyAnalysis("解析済み", 20);
+        viewModel.AudioTracks.Add(track);
+        SetPrivateField(viewModel, "_audioDurationSeconds", 20.0);
+        InvokePrivateMethod(viewModel, "UpdateSettingsLabels");
+        InvokePrivateMethod(viewModel, "UpdateValidation", true);
+
+        Assert.True(viewModel.CanEncode);
+        Assert.Contains("単一トラック", viewModel.AudioLoudnessGuidanceText, StringComparison.Ordinal);
+        Assert.Contains("音量調整なし", viewModel.AudioLoudnessGuidanceText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StandardMultipleTracks_OverrideAppliesToThisVideoAndClearResetsIt()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        SettingsService.Current.NormalTextOverlayEnabled = false;
+        var viewModel = new MainViewModel { Title = "multiple-tracks" };
+        viewModel.HandleDrop([temp.CreateImage("landscape.png", 160, 90)]);
+        var first = new AudioTrackItem(temp.CreateFile("first.wav"));
+        first.ApplyAnalysis("解析済み", 20);
+        viewModel.AudioTracks.Add(first);
+        InvokePrivateMethod(viewModel, "RecalculateAudioDuration");
+        InvokePrivateMethod(viewModel, "UpdateSettingsLabels");
+        InvokePrivateMethod(viewModel, "UpdateValidation", true);
+        Assert.False(viewModel.IsTrackNormalizationApplied);
+        Assert.False(viewModel.CanOverrideLoudnessNormalization);
+
+        var second = new AudioTrackItem(temp.CreateFile("second.wav"))
+        {
+            IsNormalizationOverrideEnabled = true,
+            NormalizationTargetLufsText = "invalid"
+        };
+        second.ApplyAnalysis("解析済み", 20);
+        viewModel.AudioTracks.Add(second);
+        InvokePrivateMethod(viewModel, "RecalculateAudioDuration");
+        InvokePrivateMethod(viewModel, "UpdateSettingsLabels");
+        InvokePrivateMethod(viewModel, "UpdateValidation", true);
+        Assert.True(viewModel.IsTrackNormalizationApplied);
+        Assert.True(viewModel.CanOverrideLoudnessNormalization);
+        Assert.False(viewModel.CanEncode);
+
+        var changedProperties = new List<string?>();
+        viewModel.PropertyChanged += (_, args) => changedProperties.Add(args.PropertyName);
+        viewModel.SkipLoudnessNormalization = true;
+        Assert.False(viewModel.IsTrackNormalizationApplied);
+        Assert.True(viewModel.CanEncode);
+        Assert.Contains("OFF", viewModel.AudioLoudnessGuidanceText, StringComparison.Ordinal);
+        Assert.Contains(nameof(MainViewModel.IsTrackNormalizationApplied), changedProperties);
+
+        viewModel.RemoveAudioTrackCommand.Execute(second);
+        Assert.False(viewModel.CanOverrideLoudnessNormalization);
+        Assert.True(viewModel.SkipLoudnessNormalization);
+        viewModel.AudioTracks.Add(second);
+        InvokePrivateMethod(viewModel, "RecalculateAudioDuration");
+        InvokePrivateMethod(viewModel, "UpdateSettingsLabels");
+        Assert.False(viewModel.IsTrackNormalizationApplied);
+
+        var otherVideo = new MainViewModel();
+        Assert.False(otherVideo.SkipLoudnessNormalization);
+        viewModel.ClearInputsCommand.Execute(null);
+        Assert.False(viewModel.SkipLoudnessNormalization);
+    }
+
+    [Fact]
+    public void DraftMode_VerticalSelectionStillUsesHorizontalOutputWithoutShortsRules()
+    {
+        var viewModel = new MainViewModel
+        {
+            UseDraftMode = true,
+            DraftOrientation = VideoOrientation.Vertical
+        };
+
+        Assert.True(viewModel.IsDraftOrientationHorizontal);
+        Assert.False(viewModel.IsDraftOrientationVertical);
+        Assert.Contains("960x540", viewModel.EncodingSettingsText, StringComparison.Ordinal);
+        Assert.Contains("Shorts制限: 対象外", viewModel.EncodingSettingsText, StringComparison.Ordinal);
+        Assert.False(viewModel.IsTrackNormalizationApplied);
+        Assert.False(viewModel.CanOverrideLoudnessNormalization);
+    }
+
+    [Fact]
+    public void RestoringSingleTrack_PreservesThisVideosInactiveOffOverride()
+    {
+        using var temp = new TestWorkspace();
+        temp.PrepareSettings();
+        temp.PrepareFakeFfmpeg();
+        var image = temp.CreateImage("background.png", 160, 90);
+        var audio = temp.CreateFile("single.wav");
+        var project = new ArchiveProject
+        {
+            Title = "restore-single",
+            UseDraftMode = false,
+            Profile = EncodeProfile.Standard,
+            Orientation = VideoOrientation.Horizontal,
+            ImagePath = Path.GetFileName(image),
+            Tracks = [new ArchiveTrack
+            {
+                AudioPath = Path.GetFileName(audio),
+                OriginalFileName = Path.GetFileName(audio)
+            }],
+            Settings = new ArchiveProcessingSettings
+            {
+                ShortsMaximumSeconds = 60,
+                OneMinuteShortsOffsetSeconds = 3,
+                ThreeMinuteShortsOffsetSeconds = 3,
+                NormalTextOverlayEnabled = false,
+                SkipLoudnessNormalization = true
+            }
+        };
+        ArchiveProjectService.Save(temp.RootPath, project);
+        var viewModel = new MainViewModel();
+
+        viewModel.LoadArchiveProject(Path.Combine(temp.RootPath, ArchiveProjectService.FileName));
+
+        Assert.True(viewModel.HasRestoredProject);
+        Assert.True(viewModel.SkipLoudnessNormalization);
+        Assert.False(viewModel.IsTrackNormalizationApplied);
+        viewModel.AudioTracks.Add(new AudioTrackItem("added.wav"));
+        Assert.False(viewModel.IsTrackNormalizationApplied);
     }
 
     private static void SetPrivateField(object target, string fieldName, object? value)
@@ -635,11 +776,11 @@ public class MainViewModelDraftModeTests
         return Assert.IsType<T>(field!.GetValue(target));
     }
 
-    private static void InvokePrivateMethod(object target, string methodName)
+    private static void InvokePrivateMethod(object target, string methodName, params object?[] arguments)
     {
         var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
-        method!.Invoke(target, null);
+        method!.Invoke(target, arguments);
     }
 
     private sealed class TestWorkspace : IDisposable

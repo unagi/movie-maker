@@ -191,7 +191,7 @@
 
       <Border x:Name="NormalizationSettingsCard" Style="{StaticResource CardStyle}" Margin="0,0,0,12">
         <StackPanel>
-          <TextBlock Text="通常モードのノーマライズ目標" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
+          <TextBlock Text="通常動画（2トラック以上・調整ON）の目標" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
           <TextBlock Text="全トラックに使う既定値です。必要なトラックだけ、メイン画面で個別に上書きできます。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,10"/>
           <Grid>
             <Grid.ColumnDefinitions>

@@ -7,7 +7,7 @@ namespace MovieMaker.Models;
 public sealed class ArchiveProject
 {
     [JsonRequired] public string Format { get; set; } = "movie-maker-project";
-    [JsonRequired] public int SchemaVersion { get; set; } = 1;
+    [JsonRequired] public int SchemaVersion { get; set; } = 2;
     [JsonRequired] public string Origin { get; set; } = "app";
     [JsonRequired] public string? Title { get; set; }
     [JsonRequired] public bool? UseDraftMode { get; set; }
@@ -41,4 +41,6 @@ public sealed class ArchiveProcessingSettings
     [JsonRequired] public double? NormalizationTargetTruePeakDbtp { get; set; }
     [JsonRequired] public bool? NormalTextOverlayEnabled { get; set; }
     [JsonRequired] public string? TextOverlayLayoutJson { get; set; }
+    // Missing in schema v1; false preserves the normal multi-track default when loading it.
+    public bool SkipLoudnessNormalization { get; set; }
 }

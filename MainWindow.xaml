@@ -416,7 +416,7 @@
                               <Button Grid.Column="2" Content="{Binding NormalizationTargetSummaryText}" Margin="12,0,0,0"
                                       Style="{StaticResource InlineButton}" Click="EditTrackNormalization_OnClick"
                                       ToolTip="このトラックのノーマライズ目標を編集"
-                                      Visibility="{Binding DataContext.IsStandardProfile, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}}"/>
+                                      Visibility="{Binding DataContext.IsTrackNormalizationApplied, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}}"/>
                             </Grid>
                             <StackPanel Orientation="Horizontal" Margin="0,2,0,0" MinHeight="22" VerticalAlignment="Center">
                               <StackPanel Orientation="Horizontal" Visibility="{Binding HasAudioMeasurements, Converter={StaticResource BoolToVisibility}}">
@@ -509,6 +509,10 @@
               <StackPanel>
                 <TextBlock Text="生成動画" Style="{StaticResource SectionTitle}"/>
                 <TextBlock Text="{Binding OutputStatusText}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+                <CheckBox Content="この動画のラウドネス調整を行わない" Margin="0,8,0,0"
+                          IsChecked="{Binding SkipLoudnessNormalization, Mode=TwoWay}"
+                          IsEnabled="{Binding CanClearInputs}"
+                          Visibility="{Binding CanOverrideLoudnessNormalization, Converter={StaticResource BoolToVisibility}}"/>
                 <Expander Header="エンコード設定の詳細" Margin="0,8,0,0">
                   <TextBlock Text="{Binding EncodingSettingsText}" TextWrapping="Wrap" FontSize="12" LineHeight="20"
                              Foreground="{StaticResource TextSecondary}" Margin="0,8,0,0"/>
