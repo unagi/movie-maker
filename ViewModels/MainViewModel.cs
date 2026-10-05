@@ -697,7 +697,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 var overrideCount = AudioTracks.Count(track => track.IsNormalizationOverrideEnabled);
                 lines.Insert(lines.IndexOf("出力制御"),
                     $"・ノーマライズ: 既定 {settings.NormalizationTargetIntegratedLufs:0.###} LUFS / " +
-                    $"{settings.NormalizationTargetTruePeakDbtp:0.###} dBTP、個別上書き {overrideCount}件（AAC変換用に1 dB余裕）");
+                    $"{settings.NormalizationTargetTruePeakDbtp:0.###} dBTP、個別上書き {overrideCount}件（固定ゲイン、AAC実測後の補正は最大1回）");
             }
             else
             {

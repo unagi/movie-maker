@@ -119,7 +119,6 @@ public static class EncodingService
     public const double MinimumTargetTruePeakDbtp = -8.0;
     public const double MaximumTargetTruePeakDbtp = 0.0;
     private const double TargetLoudnessRangeLu = 11.0;
-    private const double LossyEncodingTruePeakHeadroomDb = 1.0;
 
     private sealed record VideoEncoder(string Name, string DisplayName);
 
@@ -347,12 +346,57 @@ public static class EncodingService
                 return new EncodeResult(false, request.OutputPath, request.LogPath,
                     "音声トラックのノーマライズ解析に失敗しました。入力音声とFFmpegログを確認してください。", string.Empty);
             }
+            var initialGains = applyTrackNormalization
+                ? normalizationMeasurements!.Select((measured, index) =>
+                    CalculateNormalizationGain(measured, request.TrackNormalizationTargets![index])).ToArray()
+                : null;
+            if (initialGains != null)
+            {
+                for (var index = 0; index < initialGains.Length; index++)
+                {
+                    var target = request.TrackNormalizationTargets![index];
+                    WriteLog(logWriter, logLock,
+                        $"Loudness normalization gain: track={index + 1} gain={FormatMetric(initialGains[index])} dB " +
+                        $"target I={FormatMetric(target.IntegratedLufs)} LUFS TP={FormatMetric(target.TruePeakDbtp)} dBTP");
+                }
+            }
             foreach (var encoder in candidates)
             {
-                var psi = BuildStartInfo(request, encoder, trimTargetSeconds, segmentDurations, normalizationMeasurements);
                 WriteLog(logWriter, logLock, $"Encoder: {encoder.DisplayName} ({encoder.Name})");
+                var exitCode = -1;
+                var renderSucceeded = false;
+                var segmentEnds = new List<double>();
+                async Task<bool> GenerateAsync(IReadOnlyList<double>? gains)
+                {
+                    if (File.Exists(request.OutputPath)) File.Delete(request.OutputPath);
+                    segmentEnds.Clear();
+                    var psi = BuildStartInfo(request, encoder, trimTargetSeconds, segmentDurations, gains);
+                    var result = await RunProcessAsync(psi, logWriter, logLock, line =>
+                    {
+                        if (applyTrackNormalization && ParseConcatSegmentEnd(line) is double end)
+                            segmentEnds.Add(end);
+                    });
+                    exitCode = result.ExitCode;
+                    renderSucceeded = result.Succeeded && File.Exists(request.OutputPath);
+                    return renderSucceeded;
+                }
 
-                var (exitCode, succeeded) = await RunProcessAsync(psi, logWriter, logLock);
+                string? normalizationError = null;
+                bool succeeded;
+                if (applyTrackNormalization)
+                {
+                    normalizationError = await ApplyPeakCorrectionAsync(initialGains!, request.TrackNormalizationTargets!,
+                        gains => GenerateAsync(gains),
+                        () => MeasureEncodedTracksAsync(request, segmentEnds),
+                        line => WriteLog(logWriter, logLock, line));
+                    succeeded = normalizationError == null;
+                    if (normalizationError != null && renderSucceeded)
+                        return new EncodeResult(false, finalOutputPath, request.LogPath, normalizationError, encoder.DisplayName);
+                }
+                else
+                {
+                    succeeded = await GenerateAsync(null);
+                }
                 if (succeeded && File.Exists(request.OutputPath))
                 {
                     if (request.Profile == EncodeProfile.CopyrightCheckProduction &&
@@ -395,7 +439,7 @@ public static class EncodingService
     }
 
     private static ProcessStartInfo BuildStartInfo(EncodeRequest request, VideoEncoder encoder, double? trimTargetSeconds,
-        IReadOnlyList<double>? segmentDurations, IReadOnlyList<LoudnessNormalizationMeasurements>? normalizationMeasurements)
+        IReadOnlyList<double>? segmentDurations, IReadOnlyList<double>? normalizationGains)
     {
         var options = EncodingOptionsResolver.Resolve(request.Orientation, request.Profile, request.DraftAudioQuality);
         var psi = new ProcessStartInfo
@@ -411,12 +455,16 @@ public static class EncodingService
         {
             AddStandardTrackInputs(psi, request, segmentDurations, options);
             AddVideoEncoderArgs(psi, encoder, request);
-            psi.ArgumentList.Add("-filter_complex");
             var applyTrackNormalization = ShouldApplyTrackNormalization(request.Profile,
                 request.AudioPaths.Count, request.SkipLoudnessNormalization);
+            if (applyTrackNormalization)
+            {
+                psi.ArgumentList.Add("-loglevel");
+                psi.ArgumentList.Add("verbose");
+            }
+            psi.ArgumentList.Add("-filter_complex");
             psi.ArgumentList.Add(BuildStandardTrackFilter(segmentDurations, options,
-                applyTrackNormalization ? normalizationMeasurements : null,
-                applyTrackNormalization ? request.TrackNormalizationTargets : null,
+                applyTrackNormalization ? normalizationGains : null,
                 applyTrackNormalization));
             psi.ArgumentList.Add("-map");
             psi.ArgumentList.Add("[vout]");
@@ -515,8 +563,7 @@ public static class EncodingService
     }
 
     private static string BuildStandardTrackFilter(IReadOnlyList<double> durations, EncodingOptions options,
-        IReadOnlyList<LoudnessNormalizationMeasurements>? measurements,
-        IReadOnlyList<LoudnessNormalizationTarget>? targets, bool applyNormalization)
+        IReadOnlyList<double>? gainsDb, bool applyNormalization)
     {
         var filters = new List<string>();
         var concatInputs = new StringBuilder();
@@ -531,13 +578,7 @@ public static class EncodingService
             var audioFilter = $"[{audioInput}:a]atrim=duration={duration},asetpts=PTS-STARTPTS";
             if (applyNormalization)
             {
-                var measured = measurements![index];
-                var target = targets![index];
-                var filterTruePeakTarget = GetFilterTruePeakTarget(target.TruePeakDbtp);
-                audioFilter += $",loudnorm=I={FormatMetric(target.IntegratedLufs)}:TP={FormatMetric(filterTruePeakTarget)}:" +
-                    $"LRA={FormatMetric(TargetLoudnessRangeLu)}:measured_I={FormatMetric(measured.IntegratedLufs)}:" +
-                    $"measured_TP={FormatMetric(measured.TruePeakDbtp)}:measured_LRA={FormatMetric(measured.LoudnessRangeLu)}:" +
-                    $"measured_thresh={FormatMetric(measured.ThresholdLufs)}:linear=true";
+                audioFilter += $",volume={FormatSeconds(gainsDb![index])}dB";
             }
             audioFilter += $",aresample={options.AudioSampleRate},aformat=channel_layouts=stereo[a{index}]";
             filters.Add(audioFilter);
@@ -546,6 +587,123 @@ public static class EncodingService
 
         filters.Add($"{concatInputs}concat=n={durations.Count}:v=1:a=1[vout][aout]");
         return string.Join(';', filters);
+    }
+
+    private static double CalculateNormalizationGain(LoudnessNormalizationMeasurements input,
+        LoudnessNormalizationTarget target)
+    {
+        if (!double.IsFinite(input.IntegratedLufs) || !double.IsFinite(input.TruePeakDbtp) ||
+            !double.IsFinite(target.IntegratedLufs) || !double.IsFinite(target.TruePeakDbtp))
+        {
+            throw new ArgumentOutOfRangeException(nameof(input), "ラウドネス測定値と目標値は有限値が必要です。");
+        }
+        return Math.Min(target.IntegratedLufs - input.IntegratedLufs,
+            target.TruePeakDbtp - input.TruePeakDbtp);
+    }
+
+    private static double CalculatePeakCorrection(double measuredTruePeakDbtp, double targetTruePeakDbtp)
+    {
+        if (!double.IsFinite(measuredTruePeakDbtp) || !double.IsFinite(targetTruePeakDbtp))
+        {
+            throw new ArgumentOutOfRangeException(nameof(measuredTruePeakDbtp), "True Peakは有限値が必要です。");
+        }
+        return Math.Max(0, measuredTruePeakDbtp - targetTruePeakDbtp);
+    }
+
+    private static async Task<string?> ApplyPeakCorrectionAsync(IReadOnlyList<double> initialGainsDb,
+        IReadOnlyList<LoudnessNormalizationTarget> targets,
+        Func<IReadOnlyList<double>, Task<bool>> generate,
+        Func<Task<IReadOnlyList<AudioLoudnessResult>?>> measure, Action<string> log)
+    {
+        if (initialGainsDb.Count == 0 || initialGainsDb.Count != targets.Count ||
+            initialGainsDb.Any(gain => !double.IsFinite(gain)) ||
+            targets.Any(target => !double.IsFinite(target.IntegratedLufs) || !double.IsFinite(target.TruePeakDbtp)))
+        {
+            return "ラウドネス調整のゲインまたは目標値が無効です。";
+        }
+        var gains = initialGainsDb.ToArray();
+        // 初回出力と、必要な場合の1回だけの再生成を測定する。
+        for (var pass = 0; pass <= 1; pass++)
+        {
+            if (!await generate(gains.ToArray()))
+            {
+                return "ラウドネス調整済み動画の生成に失敗しました。";
+            }
+            var measurements = await measure();
+            if (measurements == null || measurements.Count != targets.Count ||
+                measurements.Any(result => result == null || !double.IsFinite(result.IntegratedLufs) ||
+                    result.TruePeakDbtp is not double peak || !double.IsFinite(peak)))
+            {
+                return "生成後の曲別ラウドネス測定に失敗しました。";
+            }
+            var needsCorrection = false;
+            for (var index = 0; index < targets.Count; index++)
+            {
+                var result = measurements[index];
+                var target = targets[index];
+                var correction = CalculatePeakCorrection(result.TruePeakDbtp!.Value, target.TruePeakDbtp);
+                log($"Loudness normalization output: pass={pass + 1} track={index + 1} " +
+                    $"gain={FormatMetric(gains[index])} dB I={FormatMetric(result.IntegratedLufs)} LUFS " +
+                    $"TP={FormatMetric(result.TruePeakDbtp.Value)} dBTP " +
+                    $"target I={FormatMetric(target.IntegratedLufs)} LUFS TP={FormatMetric(target.TruePeakDbtp)} dBTP");
+                if (result.IntegratedLufs < target.IntegratedLufs)
+                {
+                    log($"Loudness target not reached: track={index + 1} " +
+                        $"shortfall={FormatMetric(target.IntegratedLufs - result.IntegratedLufs)} LU");
+                }
+                if (correction <= 0) continue;
+                if (pass == 1)
+                {
+                    log($"True Peak residual exceedance: track={index + 1} " +
+                        $"excess={FormatMetric(correction)} dB; completed after one correction");
+                }
+                else
+                {
+                    gains[index] -= correction;
+                    needsCorrection = true;
+                    log($"True Peak correction: track={index + 1} attenuation={FormatMetric(correction)} dB " +
+                        $"gain={FormatMetric(gains[index])} dB; regenerating from original source");
+                }
+            }
+            if (pass == 1 || !needsCorrection) return null;
+        }
+        return null;
+    }
+
+    private static double? ParseConcatSegmentEnd(string line)
+    {
+        const string marker = "Segment finished at pts=";
+        var markerIndex = line.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0) return null;
+        var value = line[(markerIndex + marker.Length)..].Trim();
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var pts) &&
+            double.IsFinite(pts) ? pts / 1_000_000 : null;
+    }
+
+    private static async Task<IReadOnlyList<AudioLoudnessResult>?> MeasureEncodedTracksAsync(
+        EncodeRequest request, IReadOnlyList<double> segmentEnds)
+    {
+        if (segmentEnds.Count != request.AudioPaths.Count) return null;
+        var results = new List<AudioLoudnessResult>(segmentEnds.Count);
+        var start = 0.0;
+        for (var index = 0; index < segmentEnds.Count; index++)
+        {
+            var end = segmentEnds[index];
+            if (!double.IsFinite(end) || end <= start) return null;
+            var target = request.TrackNormalizationTargets![index];
+            // concatの実際の境界で完成AACを分割し、最終曲はAAC末尾まで測る。
+            var measured = await AnalyzeLoudnessForNormalizationAsync(request.OutputPath, request.FfmpegPath,
+                target.IntegratedLufs, target.TruePeakDbtp, start,
+                index == segmentEnds.Count - 1 ? null : end);
+            if (measured == null) return null;
+            results.Add(ClassifyIntegratedLoudness(measured.IntegratedLufs) with
+            {
+                TruePeakDbtp = measured.TruePeakDbtp,
+                LoudnessRangeLu = measured.LoudnessRangeLu
+            });
+            start = end;
+        }
+        return results;
     }
 
     private static async Task<IReadOnlyList<double>?> GetTrackDurationsAsync(
@@ -589,7 +747,8 @@ public static class EncodingService
     }
 
     private static async Task<LoudnessNormalizationMeasurements?> AnalyzeLoudnessForNormalizationAsync(
-        string audioPath, string ffmpegPath, double targetIntegratedLufs, double targetTruePeakDbtp)
+        string audioPath, string ffmpegPath, double targetIntegratedLufs, double targetTruePeakDbtp,
+        double? startSeconds = null, double? endSeconds = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -607,8 +766,13 @@ public static class EncodingService
         psi.ArgumentList.Add("-map");
         psi.ArgumentList.Add("0:a:0");
         psi.ArgumentList.Add("-af");
-        psi.ArgumentList.Add($"loudnorm=I={FormatMetric(targetIntegratedLufs)}:TP={FormatMetric(GetFilterTruePeakTarget(targetTruePeakDbtp))}:" +
-            $"LRA={FormatMetric(TargetLoudnessRangeLu)}:print_format=json");
+        var analysisFilter = startSeconds.HasValue
+            ? $"atrim=start={FormatSeconds(startSeconds.Value)}" +
+              (endSeconds.HasValue ? $":end={FormatSeconds(endSeconds.Value)}" : string.Empty) + ",asetpts=PTS-STARTPTS,"
+            : string.Empty;
+        analysisFilter += $"loudnorm=I={FormatMetric(targetIntegratedLufs)}:TP={FormatMetric(targetTruePeakDbtp)}:" +
+            $"LRA={FormatMetric(TargetLoudnessRangeLu)}:print_format=json";
+        psi.ArgumentList.Add(analysisFilter);
         psi.ArgumentList.Add("-vn");
         psi.ArgumentList.Add("-f");
         psi.ArgumentList.Add("null");
@@ -677,9 +841,6 @@ public static class EncodingService
         double.IsFinite(integratedLufs) && integratedLufs >= MinimumTargetIntegratedLufs &&
         integratedLufs <= MaximumTargetIntegratedLufs && double.IsFinite(truePeakDbtp) &&
         truePeakDbtp >= MinimumTargetTruePeakDbtp && truePeakDbtp <= MaximumTargetTruePeakDbtp;
-
-    private static double GetFilterTruePeakTarget(double requestedTruePeakDbtp) =>
-        requestedTruePeakDbtp - LossyEncodingTruePeakHeadroomDb;
 
     private static string FormatMetric(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
 
@@ -1371,18 +1532,21 @@ public static class EncodingService
     private static async Task<(int ExitCode, bool Succeeded)> RunProcessAsync(
         ProcessStartInfo psi,
         StreamWriter logWriter,
-        object logLock)
+        object logLock,
+        Action<string>? observer = null)
     {
         using var process = new Process { StartInfo = psi };
         process.OutputDataReceived += (_, args) =>
         {
             if (args.Data == null) return;
             WriteLog(logWriter, logLock, args.Data);
+            observer?.Invoke(args.Data);
         };
         process.ErrorDataReceived += (_, args) =>
         {
             if (args.Data == null) return;
             WriteLog(logWriter, logLock, args.Data);
+            observer?.Invoke(args.Data);
         };
 
         process.Start();

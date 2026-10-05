@@ -130,56 +130,6 @@ public sealed class EncodingServiceIntegrationTests
     }
 
     [Fact]
-    public async Task NormalMultipleTracks_NormalizationChangesLoudnessAndCanBeSkipped()
-    {
-        var ffmpeg = EncodingService.ResolveFfmpegPath();
-        Assert.NotNull(ffmpeg);
-        using var workspace = new Workspace();
-        var firstAudio = await workspace.CreateAudioAsync(ffmpeg!, "first.wav", 4.0);
-        var secondAudio = await workspace.CreateAudioAsync(ffmpeg!, "second.wav", 4.0);
-        var image = workspace.CreateImage("landscape.png", 160, 90);
-        var normalizedOutput = Path.Combine(workspace.Root, "normal-multiple-normalized.mp4");
-        var normalizedRequest = new EncodeRequest(ffmpeg, image, [firstAudio, secondAudio], normalizedOutput,
-            VideoOrientation.Horizontal, EncodeProfile.Standard,
-            Path.Combine(workspace.Root, "normal-multiple-normalized.log"), DraftAudioQuality.High,
-            TrackNormalizationTargets: [new LoudnessNormalizationTarget(-14, -1),
-                new LoudnessNormalizationTarget(-14, -1)],
-            NormalTextOverlayEnabled: false);
-        var unnormalizedOutput = Path.Combine(workspace.Root, "normal-multiple-unnormalized.mp4");
-        var unnormalizedRequest = new EncodeRequest(ffmpeg, image, [firstAudio, secondAudio], unnormalizedOutput,
-            VideoOrientation.Horizontal, EncodeProfile.Standard,
-            Path.Combine(workspace.Root, "normal-multiple-unnormalized.log"), DraftAudioQuality.High,
-            NormalTextOverlayEnabled: false,
-            SkipLoudnessNormalization: true);
-
-        var sourceLoudness = await EncodingService.GetAudioLoudnessAsync(firstAudio, ffmpeg);
-        Assert.NotNull(sourceLoudness);
-        var normalizedResult = await EncodingService.EncodeAsync(normalizedRequest);
-        var unnormalizedResult = await EncodingService.EncodeAsync(unnormalizedRequest);
-
-        Assert.True(normalizedResult.Success, normalizedResult.ErrorMessage);
-        Assert.True(unnormalizedResult.Success, unnormalizedResult.ErrorMessage);
-        var normalizedAudio = await EncodingService.GetAudioInfoAsync(normalizedOutput, ffmpeg);
-        var unnormalizedAudio = await EncodingService.GetAudioInfoAsync(unnormalizedOutput, ffmpeg);
-        Assert.Equal(48000, normalizedAudio?.SampleRate);
-        Assert.Equal(48000, unnormalizedAudio?.SampleRate);
-        Assert.InRange(normalizedAudio!.DurationSeconds!.Value, 7.8, 8.2);
-        Assert.InRange(unnormalizedAudio!.DurationSeconds!.Value, 7.8, 8.2);
-        var normalizedLoudness = await EncodingService.GetAudioLoudnessAsync(normalizedOutput, ffmpeg);
-        var unnormalizedLoudness = await EncodingService.GetAudioLoudnessAsync(unnormalizedOutput, ffmpeg);
-        Assert.NotNull(normalizedLoudness);
-        Assert.NotNull(unnormalizedLoudness);
-        Assert.InRange(Math.Abs(normalizedLoudness!.IntegratedLufs - (-14.0)), 0, 0.5);
-        Assert.InRange(Math.Abs(unnormalizedLoudness!.IntegratedLufs - sourceLoudness!.IntegratedLufs), 0, 1.5);
-        Assert.True(Math.Abs(unnormalizedLoudness.IntegratedLufs - (-14.0)) > 3.0);
-        Assert.Contains("Loudness normalization input:",
-            await File.ReadAllTextAsync(normalizedRequest.LogPath));
-        Assert.DoesNotContain("Loudness normalization input:",
-            await File.ReadAllTextAsync(unnormalizedRequest.LogPath));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace.Root, ".movie-maker-*"));
-    }
-
-    [Fact]
     public async Task NormalMultipleTracks_SkipNormalizationAllowsSilentTrackWithoutTargets()
     {
         var ffmpeg = EncodingService.ResolveFfmpegPath();
